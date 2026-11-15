@@ -13,11 +13,15 @@ const MAX_BACKUP_BYTES = 5_000_000;
 export function render(view) {
   view.body.innerHTML = `
     ${backupFileSection()}
-    ${snapshotSection()}
     ${unreadableSection()}
     ${iosSection()}
-    <h3>Start over</h3>
-    <button type="button" class="btn danger" id="b-wipe">Erase everything</button>
+    <details class="more">
+      <summary>More options</summary>
+      ${snapshotSection()}
+      <h3>Start over</h3>
+      <p class="hint">Deletes every wheel, all progress and the PIN on this device.</p>
+      <button type="button" class="btn danger" id="b-wipe">Erase everything</button>
+    </details>
   `;
   bindBackupFile(view);
   bindSnapshots(view);
@@ -32,14 +36,14 @@ function backupFileSection() {
   const lastBackup = settings.lastBackup ? `Last backup: ${formatDay(settings.lastBackup)}.` : 'No backup yet.';
   return `
     <h3>Back up to a file</h3>
-    <p>Progress is saved in this browser on this device. A backup file is the only copy that survives clearing browser data or a lost device.</p>
+    <p class="hint">Wheels are saved in this browser. A backup file keeps a copy that survives clearing browser data or losing this device.</p>
     <div class="row wrap">
       <button type="button" class="btn primary" id="b-export">${icon('download', { size: 18 })} Save backup file</button>
       <span class="hint">${lastBackup}</span>
     </div>
 
     <h3>Restore from a file</h3>
-    <p class="hint">Replaces everything on this device with what's in the backup file. (An automatic snapshot is taken first, so this can be undone.)</p>
+    <p class="hint">Replaces everything on this device with the backup. (You can undo this.)</p>
     <button type="button" class="btn" id="b-import">${icon('upload', { size: 18 })} Choose backup file…</button>
     <input type="file" id="b-import-file" accept="application/json,.json" hidden>`;
 }
@@ -134,8 +138,8 @@ function snapshotSection() {
   const snapshots = store.listSnapshots();
   const when = (at) => new Date(at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
   return `
-    <h3>Automatic snapshots</h3>
-    <p class="hint">Saved on this device at the start of each day and before anything like a reset or restore, in case of mistakes. They don't replace a backup file: clearing browser data removes them too.</p>
+    <h3>Undo a recent change</h3>
+    <p class="hint">Snapshots taken automatically each day and before big changes, like removing a wheel. Restoring one puts everything back the way it was.</p>
     ${
       snapshots.length
         ? `<ul class="snapshot-list" id="b-snapshots">${snapshots

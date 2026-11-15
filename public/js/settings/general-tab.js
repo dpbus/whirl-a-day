@@ -9,6 +9,7 @@ export function render(view) {
   view.body.innerHTML = `
     ${spinSection()}
     ${pinSection()}
+    ${moreSection()}
   `;
   bindSpin(view);
   bindPin(view);
@@ -26,16 +27,6 @@ function spinSection() {
     <div class="toggles">
       <label class="switch"><input type="checkbox" id="g-sound"><span>Sound effects</span></label>
       <label class="switch"><input type="checkbox" id="g-confetti"><span>Confetti</span></label>
-    </div>
-    <div class="field">
-      <label for="g-tick">Spinning sound</label>
-      <div class="row">
-        <select id="g-tick">
-          <option value="auto">Match each wheel's theme</option>
-          ${Object.entries(TICK_STYLES).map(([id, name]) => `<option value="${id}">${escapeHtml(name)}</option>`).join('')}
-        </select>
-        <button type="button" class="btn" id="g-tick-preview">${icon('play', { size: 18 })} Preview</button>
-      </div>
     </div>`;
 }
 
@@ -68,13 +59,31 @@ function bindSpin(view) {
   $('#g-tick-preview', view.body).addEventListener('click', () => previewTicks(tickStyle()));
 }
 
+/** Rarely changed: which sound the wheel makes while it turns. */
+function moreSection() {
+  return `
+    <details class="more">
+      <summary>More options</summary>
+      <div class="field">
+        <label for="g-tick">Spinning sound</label>
+        <div class="row">
+          <select id="g-tick">
+            <option value="auto">Match each wheel's theme</option>
+            ${Object.entries(TICK_STYLES).map(([id, name]) => `<option value="${id}">${escapeHtml(name)}</option>`).join('')}
+          </select>
+          <button type="button" class="btn" id="g-tick-preview">${icon('play', { size: 18 })} Preview</button>
+        </div>
+      </div>
+    </details>`;
+}
+
 // ---------------------------------------------------------------- PIN
 
 function pinSection() {
   const hasPin = Boolean(store.getState().settings.pin);
   return `
     <h3>Grown-up PIN</h3>
-    <p class="hint">Optional. When set, opening settings asks for the PIN — so kids can't undo spins, grant themselves extra spins, or peek at surprises. Switching wheels doesn't need it. It's kid-proofing, not real security.</p>
+    <p class="hint">Optional. Settings and new wheels will ask for it, so kids can't give themselves extra spins or peek at surprises. It's kid-proofing, not real security.</p>
     <form class="settings-form" id="g-pin-form">
       <div class="row wrap">
         <input id="g-pin" type="password" inputmode="numeric" maxlength="8" autocomplete="new-password"

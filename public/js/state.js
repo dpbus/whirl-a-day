@@ -430,10 +430,14 @@ export function activePlayer(wheel) {
 
 export const activePlayerId = (wheel) => activePlayer(wheel)?.id ?? null;
 
-export function setActiveWheel(id) {
+/**
+ * Show this wheel. `save: false` keeps the choice to this tab of the app (used after reloading
+ * what another tab saved, so each tab stays on its own wheel).
+ */
+export function setActiveWheel(id, { save: persist = true } = {}) {
   if (getWheel(id)) {
     state.activeWheelId = id;
-    save();
+    if (persist) save();
   }
 }
 
@@ -509,17 +513,6 @@ export function removeOption(wheel, optionId) {
   act(wheel, 'remove-option', { id: optionId });
 }
 
-/** Replace a wheel's options and rules with a preset, and start everyone's progress over. */
-export function loadPreset(wheel, presetId) {
-  snapshotFirst(wheel, `Before loading a preset on “${rules.wheelTitle(wheel)}”`);
-  const base = wheelFromPreset(presetId);
-  act(wheel, 'replace-options', {
-    options: base.options.map(({ id, label }) => ({ id, label })),
-    removeAfterSpin: base.removeAfterSpin,
-    spinsPerDay: base.spinsPerDay,
-  });
-}
-
 /** Drop never-spun options left with an empty label (called when settings close). */
 export function pruneBlankOptions() {
   for (const wheel of state.wheels) {
@@ -572,10 +565,6 @@ export function removePlayer(wheel, id) {
     act(wheel, 'set-props', { sharedWheel: true });
   }
   save();
-}
-
-export function movePlayer(wheel, id, delta) {
-  act(wheel, 'move-player', { id, delta });
 }
 
 export function setActivePlayer(wheel, id) {

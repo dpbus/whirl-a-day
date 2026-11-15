@@ -448,15 +448,23 @@ dialog.settings[open] { display: flex; flex-direction: column; height: min(760px
 .opt-surprise { grid-area: surprise; font-size: 0.92rem; }
 .opt-status { grid-area: status; font-size: 0.8rem; color: var(--surface-muted); font-weight: 600; }
 
-details.more { margin: 12px 0 8px; padding: 12px 14px; border-radius: 14px; background: var(--input-bg); }
+details.more { margin: 24px 0 8px; padding: 12px 14px; border-radius: 14px; background: var(--input-bg); }
 details.more summary { cursor: pointer; font-weight: 600; }
 details.more .row { margin-top: 12px; }
 
-.player-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
-.player-list li { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-.player-list li .p-name { flex: 1; }
-.p-progress { flex-basis: 100%; display: flex; flex-direction: column; gap: 6px; padding: 0 0 10px 4px; border-bottom: 1px solid var(--border); }
-.p-progress .hint { margin: 0; }
+/* A list of rows: a name with a short status line, and a "⋯" button (Players, progress). */
+.row-list { list-style: none; margin: 0 0 12px; padding: 0; display: flex; flex-direction: column; }
+.list-row { display: flex; align-items: center; gap: 10px; padding: 10px 2px; border-bottom: 1px solid var(--border); }
+.list-row:last-child { border-bottom: 0; }
+.row-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.row-text strong { overflow-wrap: anywhere; }
+.row-text .hint { margin: 2px 0 0; }
+
+/* The "⋯" menu and the rename prompt */
+.menu-items { display: flex; flex-direction: column; gap: 8px; }
+.menu-item { width: 100%; justify-content: flex-start; text-align: left; }
+.prompt-input { margin-bottom: 4px; }
+details.more h3:first-of-type { margin-top: 16px; }
 .settings-form { margin-top: 8px; padding-top: 4px; border-top: 1px solid var(--border); }
 
 .theme-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }

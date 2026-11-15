@@ -128,7 +128,7 @@ function showJoinDialog(code, info) {
 async function openHostLink(value) {
   const [wheelId, token] = String(value).split('.');
   if (!store.isWheelId(wheelId) || !store.isToken(token)) {
-    alertDialog("That host link isn't complete. Copy the whole link and try again.", { title: "Couldn't open the wheel" });
+    alertDialog("That link isn't complete. Copy the whole link and try again.", { title: "Couldn't open the wheel" });
     return;
   }
   const existing = store.getState().wheels.find((w) => w.online?.wheelId === wheelId);
@@ -138,8 +138,8 @@ async function openHostLink(value) {
     return;
   }
   const ok = await confirmDialog(
-    'Manage this wheel from this device? Anyone with the host link can change the wheel, so keep the link private.',
-    { title: 'Open host link?', ok: 'Open' },
+    'Manage this wheel from this device too? Anyone with this link can change the wheel, so keep it private.',
+    { title: 'Manage this wheel here?', ok: 'Yes, manage it here' },
   );
   if (!ok) return;
   // The server sends the wheel itself once the connection signs in.
@@ -153,17 +153,17 @@ export function showHostLink(wheel) {
   const dialog = makeDialog(
     'small',
     `<form method="dialog" class="dialog-body">
-      <h2 id="${titleId}">Host link</h2>
+      <h2 id="${titleId}">Manage from another device</h2>
       <p>Open this link on another device to manage “${escapeHtml(wheelTitle(wheel))}” from there too. Save it somewhere safe, like your notes or email to yourself, in case you lose this one.</p>
       <p class="hint"><strong>Keep it private:</strong> anyone with this link can change the wheel and see every surprise.</p>
-      <input class="link-field" readonly aria-label="Host link">
+      <input class="link-field" readonly aria-label="Link to manage this wheel">
       ${linkButtons()}
       <div class="dialog-actions"><button class="btn primary">Done</button></div>
     </form>`,
     titleId,
   );
   dialog.querySelector('.link-field').value = link;
-  bindLinkButtons(dialog, link, `Host link for ${wheelTitle(wheel)}`);
+  bindLinkButtons(dialog, link, `Manage ${wheelTitle(wheel)}`);
   dialog.showModal();
 }
 
@@ -265,7 +265,7 @@ export function showInvite(wheel, { justCreated = false } = {}) {
       <p class="join-link">${escapeHtml(link.replace(/^https?:\/\//, ''))}</p>
       ${linkButtons()}
       ${wheel.online.joinOpen ? '' : '<p class="hint">Joining is closed right now. Open it in Settings → Players.</p>'}
-      <p class="hint">You can bring this QR code back any time with the QR button at the top of the screen.${justCreated ? ' Tip: save your host link (Settings → This wheel → Online) somewhere safe, so you can manage this wheel from another device.' : ''}</p>
+      <p class="hint">You can bring this QR code back any time with the QR button at the top of the screen.${justCreated ? ' To run it from another device too, see Settings → This wheel → More options.' : ''}</p>
       <div class="dialog-actions"><button class="btn primary">Done</button></div>
     </form>`,
     titleId,
@@ -308,14 +308,14 @@ export function hostAction(wheel, name, args) {
 /** Delete the wheel from the server and keep it as a wheel on this device. */
 export async function takeOffline(wheel) {
   const ok = await confirmDialog(
-    `Take “${wheelTitle(wheel)}” offline? It's deleted from whirladay.com, everyone else loses it, and it becomes a wheel on this device with everyone's progress so far.`,
-    { title: 'Take offline?', ok: 'Take offline', danger: true },
+    `Stop sharing “${wheelTitle(wheel)}” online? It's deleted from whirladay.com and everyone else loses it. It stays on this device with everyone's progress so far.`,
+    { title: 'Stop sharing online?', ok: 'Stop sharing', danger: true },
   );
   if (!ok) return false;
   try {
     await hostAction(wheel, 'delete');
   } catch (err) {
-    alertDialog(err.message, { title: "Couldn't take it offline" });
+    alertDialog(err.message, { title: "Couldn't stop sharing it" });
     return false;
   }
   const current = store.getWheel(wheel.id); // may be a fresher copy if storage reloaded meanwhile
@@ -341,7 +341,7 @@ export function statusText(wheel, status) {
       return 'Reconnecting… Spins need a connection.';
     case 'signed-out':
       return role === 'host'
-        ? "This device isn't signed in to this wheel. Open your host link here to manage it again."
+        ? "This device isn't signed in to this wheel anymore. To manage it again, open its link from “Manage from another device”."
         : "This device isn't signed in to this wheel anymore. Scan the QR code again to rejoin.";
     case 'gone':
       return role === 'host'

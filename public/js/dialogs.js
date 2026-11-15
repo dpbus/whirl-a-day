@@ -125,3 +125,52 @@ export function pinPrompt(expected) {
     pinInput.focus();
   });
 }
+
+/**
+ * A short list of actions (e.g. for one player). `items`: [{ id, label, danger? }].
+ * Resolves the chosen id, or null if cancelled.
+ */
+export function menuDialog(title, items) {
+  return new Promise((resolve) => {
+    const titleId = `dlg-${uid()}`;
+    const dialog = makeDialog(
+      'small menu',
+      `<form method="dialog" class="dialog-body">
+        <h2 id="${titleId}">${escapeHtml(title)}</h2>
+        <div class="menu-items">
+          ${items.map((item) => `<button class="btn menu-item${item.danger ? ' danger' : ''}" value="${escapeHtml(item.id)}">${escapeHtml(item.label)}</button>`).join('')}
+        </div>
+        <div class="dialog-actions"><button type="button" class="btn" data-cancel>Cancel</button></div>
+      </form>`,
+      titleId,
+    );
+    dialog.querySelector('[data-cancel]').addEventListener('click', () => dialog.close(''));
+    dialog.addEventListener('close', () => resolve(items.some((i) => i.id === dialog.returnValue) ? dialog.returnValue : null));
+    dialog.showModal();
+  });
+}
+
+/** Ask for a line of text. Resolves the trimmed text, or null if cancelled or left empty. */
+export function promptDialog(label, { title = label, value = '', maxLength = 100, ok = 'Save' } = {}) {
+  return new Promise((resolve) => {
+    const titleId = `dlg-${uid()}`;
+    const dialog = makeDialog(
+      'small',
+      `<form method="dialog" class="dialog-body">
+        <h2 id="${titleId}">${escapeHtml(title)}</h2>
+        <input class="prompt-input" maxlength="${maxLength}" aria-label="${escapeHtml(label)}" autocomplete="off" data-1p-ignore data-lpignore="true" data-bwignore>
+        <div class="dialog-actions">
+          <button type="button" class="btn" data-cancel>Cancel</button>
+          <button class="btn primary" value="ok">${escapeHtml(ok)}</button>
+        </div>
+      </form>`,
+      titleId,
+    );
+    const input = dialog.querySelector('.prompt-input');
+    input.value = value;
+    dialog.querySelector('[data-cancel]').addEventListener('click', () => dialog.close(''));
+    dialog.addEventListener('close', () => resolve(dialog.returnValue === 'ok' && input.value.trim() ? input.value.trim() : null));
+    dialog.showModal();
+    input.select();
+  });
+}

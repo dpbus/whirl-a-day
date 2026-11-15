@@ -1,11 +1,10 @@
-// Progress tools (undo, extra spin, reset), shared by the This wheel and Players tabs.
+// Progress, for the Players and This wheel tabs: short summaries, and the progress actions
+// (undo, extra spin, start over) offered in each row's "⋯" menu.
 //
-// Where they live:
-//   - a wheel with players: the Players tab. Each player's row has their own tools; a shared
-//     wheel also gets a "Wheel progress" section, since its undo and reset are the wheel's.
-//   - a shared wheel without players: the This wheel tab (there's no one to list).
+// `playerId` null means the whole wheel: a shared wheel's undo and start over are the wheel's.
 import * as store from '../state.js';
-import { confirmDialog } from '../dialogs.js';
+import { confirmDialog, menuDialog } from '../dialogs.js';
+import { icon } from '../icons.js';
 import { plural } from '../templates.js';
 import { dayKey } from '../rules.js';
 import { displayName, escapeHtml, formatDay } from '../util.js';
@@ -13,129 +12,97 @@ import { displayName, escapeHtml, formatDay } from '../util.js';
 const day = (wheel, spin) => formatDay(dayKey(spin.at, wheel.timeZone));
 const optionLabel = (wheel, spin) => store.findOption(wheel, spin.optionId)?.label ?? 'a removed option';
 
-/** e.g. "3 spins · last “7” on Dec 3 · today: 1 spun, 0 left (incl. 1 extra)" */
-function summary(wheel, playerId, { spins = store.spinsFor(wheel, playerId), limit = true } = {}) {
-  const last = spins.at(-1);
-  const parts = [plural(spins.length, 'spin')];
-  if (last) parts.push(`last “${optionLabel(wheel, last)}” on ${day(wheel, last)}`);
-  if (limit && wheel.spinsPerDay) {
-    const bonus = store.bonusToday(wheel, playerId);
-    parts.push(`today: ${store.spinsToday(wheel, playerId)} spun, ${store.spinsLeftToday(wheel, playerId)} left${bonus ? ` (incl. ${bonus} extra)` : ''}`);
+/** On a shared wheel, is the daily limit the whole group's (so extra spins are too)? */
+const groupLimit = (wheel) => wheel.sharedWheel && wheel.sharedDailyLimit === true;
+
+/** Does `playerId` (null: the whole wheel) have their own daily limit to top up? */
+function hasOwnLimit(wheel, playerId) {
+  if (!wheel.spinsPerDay) return false;
+  if (playerId === null) return !wheel.players.length || groupLimit(wheel);
+  return !groupLimit(wheel);
+}
+
+/** The spins counted for a row: the player's own (even on a shared wheel), or all of them. */
+const rowSpins = (wheel, playerId) => (playerId === null ? wheel.spins : wheel.spins.filter((s) => s.playerId === playerId));
+
+/** e.g. "3 spins · 1 left today", "5 spins · last: Pasta", "No spins yet" */
+export function summary(wheel, playerId) {
+  const spins = rowSpins(wheel, playerId);
+  const parts = [spins.length ? plural(spins.length, 'spin') : 'No spins yet'];
+  if (hasOwnLimit(wheel, playerId)) {
+    const left = store.spinsLeftToday(wheel, playerId);
+    parts.push(left ? `${left} left today` : 'done for today');
+  } else if (spins.length) {
+    parts.push(`last: ${optionLabel(wheel, spins.at(-1))}`);
   }
   return parts.join(' · ');
 }
 
-/** On a shared wheel, is the daily limit the whole group's (so extra spins are too)? */
-const groupLimit = (wheel) => wheel.sharedWheel && wheel.sharedDailyLimit === true;
-
-// ================================================================ the whole wheel (shared wheels)
-
-export function wheelProgressSection(wheel) {
-  const hasSpins = wheel.spins.length > 0;
-  const perPlayerLimit = wheel.players.length > 0 && !groupLimit(wheel);
-  return `
-    <h3>${wheel.players.length ? 'Wheel progress' : 'Progress'}</h3>
-    <p class="hint">${escapeHtml(summary(wheel, null, { spins: wheel.spins, limit: !perPlayerLimit }))}</p>
-    <div class="row wrap">
-      <button type="button" class="btn small" data-wheel-undo ${hasSpins ? '' : 'disabled'}>Undo last spin</button>
-      ${wheel.spinsPerDay && !perPlayerLimit ? '<button type="button" class="btn small" data-wheel-extra>+1 spin today</button>' : ''}
-      <button type="button" class="btn small danger" data-wheel-reset ${hasSpins ? '' : 'disabled'}>Reset wheel</button>
-    </div>
-    ${perPlayerLimit && wheel.spinsPerDay ? '<p class="hint">Extra spins are per person: use “+1 spin today” on their row.</p>' : ''}`;
+/** The progress actions that make sense for this row right now. */
+export function progressActions(wheel, playerId) {
+  const whole = playerId === null;
+  // On a shared wheel, undo and start over belong to the whole wheel's row.
+  const ownProgress = whole || !wheel.sharedWheel;
+  const hasSpins = (whole ? wheel.spins : store.spinsFor(wheel, playerId)).length > 0;
+  const items = [];
+  if (ownProgress && hasSpins) items.push({ id: 'undo', label: 'Undo last spin' });
+  if (hasOwnLimit(wheel, playerId)) items.push({ id: 'extra', label: 'Give an extra spin today' });
+  if (ownProgress && hasSpins) items.push({ id: 'reset', label: whole ? 'Start the wheel over' : 'Start over', danger: true });
+  return items;
 }
 
-/** Wire up wheelProgressSection inside `container`. `done()` redraws after a change. */
-export function bindWheelProgress(container, wheel, done) {
-  container.addEventListener('click', async (event) => {
-    const button = event.target.closest('[data-wheel-undo], [data-wheel-extra], [data-wheel-reset]');
-    if (!button) return;
-    if (button.hasAttribute('data-wheel-extra')) {
-      store.allowExtraSpin(wheel, null);
-    } else if (button.hasAttribute('data-wheel-undo')) {
-      const last = wheel.spins.at(-1);
-      if (!last) return;
-      const who = store.findPlayer(wheel, last.playerId);
-      const ok = await confirmDialog(`Undo ${who ? `${displayName(who)}'s ` : ''}“${optionLabel(wheel, last)}” (${day(wheel, last)})? It goes back on the wheel and can be spun again.`, {
-        title: 'Undo last spin?',
-        ok: 'Undo',
-      });
-      // The data may have been reloaded while the question was open.
-      const current = store.getWheel(wheel.id);
-      if (!ok || !current) return;
-      store.undoLastSpin(current, null);
-    } else {
-      const ok = await confirmDialog('Reset this wheel? Every option goes back on and the history is cleared.', {
-        title: 'Reset wheel?',
-        ok: 'Reset',
-        danger: true,
-      });
-      const current = store.getWheel(wheel.id);
-      if (!ok || !current) return;
-      store.resetProgress(current, null);
-    }
-    done();
-  });
-}
-
-// ================================================================ one player (a row in Players)
-
-export function playerProgressRow(wheel, player) {
-  const name = escapeHtml(displayName(player));
-  if (wheel.sharedWheel) {
-    // Their spins on the shared wheel; undo and reset are the wheel's (above the list).
-    const own = wheel.spins.filter((s) => s.playerId === player.id);
-    const extra = wheel.spinsPerDay && !groupLimit(wheel);
-    return `
-      <div class="p-progress">
-        <span class="hint">${escapeHtml(summary(wheel, player.id, { spins: own, limit: extra }))}</span>
-        ${extra ? `<div class="row wrap"><button type="button" class="btn small" data-extra aria-label="Give ${name} 1 extra spin today">+1 spin today</button></div>` : ''}
-      </div>`;
+/** Carry out a progress action (asking first where it can't be taken back). Returns true if done. */
+export async function runProgressAction(wheel, playerId, action) {
+  const player = store.findPlayer(wheel, playerId);
+  const name = player ? displayName(player) : null;
+  if (action === 'extra') {
+    store.allowExtraSpin(wheel, playerId);
+    return true;
   }
-  const hasSpins = store.spinsFor(wheel, player.id).length > 0;
-  return `
-    <div class="p-progress">
-      <span class="hint">${escapeHtml(summary(wheel, player.id))}</span>
-      <div class="row wrap">
-        <button type="button" class="btn small" data-undo ${hasSpins ? '' : 'disabled'} aria-label="Undo ${name}'s last spin">Undo last</button>
-        ${wheel.spinsPerDay ? `<button type="button" class="btn small" data-extra aria-label="Give ${name} 1 extra spin today">+1 spin today</button>` : ''}
-        <button type="button" class="btn small danger" data-reset ${hasSpins ? '' : 'disabled'} aria-label="Reset ${name}'s progress">Reset</button>
-      </div>
-    </div>`;
+  if (action === 'undo') {
+    const last = playerId === null ? wheel.spins.at(-1) : store.spinsFor(wheel, playerId).at(-1);
+    if (!last) return false;
+    const whose = store.findPlayer(wheel, last.playerId);
+    const ok = await confirmDialog(
+      `Take back ${whose ? `${displayName(whose)}'s ` : ''}“${optionLabel(wheel, last)}” from ${day(wheel, last)}? It goes back on the wheel and can come up again.`,
+      { title: 'Undo last spin?', ok: 'Undo' },
+    );
+    // The data may have been reloaded while the question was open.
+    const current = store.getWheel(wheel.id);
+    if (!ok || !current) return false;
+    store.undoLastSpin(current, playerId);
+    return true;
+  }
+  if (action === 'reset') {
+    const ok = await confirmDialog(
+      name ? `Start ${name} over? All their options go back on and their history is cleared.` : 'Start the wheel over? Every option goes back on and the history is cleared.',
+      { title: 'Start over?', ok: 'Start over', danger: true },
+    );
+    const current = store.getWheel(wheel.id);
+    if (!ok || !current) return false;
+    store.resetProgress(current, playerId);
+    return true;
+  }
+  return false;
 }
 
-/** Wire up playerProgressRow buttons in a list of [data-id] rows. `done()` redraws after a change. */
-export function bindPlayerProgress(list, wheel, done) {
-  list.addEventListener('click', async (event) => {
-    const button = event.target.closest('[data-undo], [data-extra], [data-reset]');
-    if (!button) return;
-    const id = button.closest('[data-id]').dataset.id;
-    const player = store.findPlayer(wheel, id);
-    if (!player) return;
-    const name = displayName(player);
+// ================================================================ the whole wheel's row
 
-    if (button.hasAttribute('data-extra')) {
-      store.allowExtraSpin(wheel, id);
-    } else if (button.hasAttribute('data-undo')) {
-      const last = store.spinsFor(wheel, id).at(-1);
-      if (!last) return;
-      const ok = await confirmDialog(`Undo ${name}'s “${optionLabel(wheel, last)}” (${day(wheel, last)})? It goes back on their wheel and can be spun again.`, {
-        title: 'Undo last spin?',
-        ok: 'Undo',
-      });
-      const current = store.getWheel(wheel.id);
-      if (!ok || !current) return;
-      store.undoLastSpin(current, id);
-    } else {
-      const ok = await confirmDialog(`Reset ${name}'s progress on this wheel? Every option goes back on and their history is cleared.`, {
-        title: 'Reset progress?',
-        ok: 'Reset',
-        danger: true,
-      });
-      const current = store.getWheel(wheel.id);
-      if (!ok || !current) return;
-      store.resetProgress(current, id);
-    }
-    done();
+/** A row for a shared wheel's own progress, with a "⋯" menu. Wire it up with bindWheelRow(). */
+export function wheelRow(wheel) {
+  if (!progressActions(wheel, null).length && !wheel.spins.length) return '';
+  return `
+    <ul class="row-list">
+      <li class="list-row">
+        <span class="row-text"><strong>${wheel.players.length ? 'Everyone' : 'This wheel'}</strong><span class="hint">${escapeHtml(summary(wheel, null))}</span></span>
+        ${progressActions(wheel, null).length ? `<button type="button" class="icon-btn small" data-wheel-menu aria-label="Progress options">${icon('ellipsis', { size: 18 })}</button>` : ''}
+      </li>
+    </ul>`;
+}
+
+export function bindWheelRow(container, wheel, done) {
+  container.querySelector('[data-wheel-menu]')?.addEventListener('click', async () => {
+    const action = await menuDialog(wheel.players.length ? 'Everyone' : 'This wheel', progressActions(wheel, null));
+    if (action && (await runProgressAction(wheel, null, action))) done();
   });
 }
-

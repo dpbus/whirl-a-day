@@ -94,6 +94,12 @@ let connection = null;
 export function connectTo(wheel, hooks) {
   const wanted = wheel?.online && wheel.online.token ? wheel : null;
   if (connection?.wheel === wanted && connection?.token === wanted?.online.token) return connection;
+  // The same wheel, just a fresh copy (after reloading what another tab saved): keep the
+  // connection and point it at the new copy, rather than dropping and reconnecting.
+  if (wanted && connection && !connection.closed && connection.wheel.online?.wheelId === wanted.online.wheelId && connection.token === wanted.online.token) {
+    connection.wheel = wanted;
+    return connection;
+  }
   connection?.close();
   connection = wanted ? new Connection(wanted, hooks) : null;
   return connection;

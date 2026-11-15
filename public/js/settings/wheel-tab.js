@@ -1,7 +1,8 @@
-// Settings → This wheel: the active wheel's title, theme and rules, its options, putting it
-// online, and removing it. (Progress tools: see progress.js.)
+// Settings → This wheel: the wheel on screen. Title, theme, its two rules, its options, and
+// playing online; rarer things (adding many options, managing from another device, stopping
+// sharing, removing the wheel) are under "More options". Progress tools are in Players, except on
+// a shared wheel with no players, which has nobody to list (see progress.js).
 import * as store from '../state.js';
-import { getPreset } from '../presets.js';
 import { alertDialog, confirmDialog } from '../dialogs.js';
 import { icon } from '../icons.js';
 import { plural } from '../templates.js';
@@ -9,83 +10,52 @@ import { dayKey } from '../rules.js';
 import * as online from '../store/online.js';
 import { keepLocalCopy, putOnline, showHostLink, takeOffline } from '../online-ui.js';
 import { $, displayName, escapeHtml, formatDay, range } from '../util.js';
-import { bindThemeCards, presetOptions, themeCards } from './shared.js';
-import { bindWheelProgress, wheelProgressSection } from './progress.js';
+import { bindThemeCards, themeCards } from './shared.js';
+import { bindWheelRow, wheelRow } from './progress.js';
 
 export function render(view) {
   const wheel = store.activeWheel();
   if (!store.canManage(wheel)) return renderJoined(view, wheel);
   view.body.innerHTML = `
-    ${rulesSection(wheel)}
+    ${basicsSection(wheel)}
     ${optionsSection()}
-    <div id="w-progress">${wheel.players.length ? progressPointer() : wheelProgressSection(wheel)}</div>
+    ${wheel.players.length ? '' : `<div id="w-progress"><h3>Progress</h3>${wheelRow(wheel) || '<p class="hint">No spins yet.</p>'}</div>`}
     ${onlineSection(wheel)}
-    ${removeSection(wheel)}
+    ${moreOptions(wheel)}
   `;
-  bindRules(view, wheel);
+  bindBasics(view, wheel);
   bindOptions(view, wheel);
-  bindWheelProgress($('#w-progress', view.body), wheel, () => {
-    view.changed();
-    refresh(view);
-  });
-  $('#w-to-players', view.body)?.addEventListener('click', () => view.showTab('players'));
+  const progress = $('#w-progress', view.body);
+  if (progress) bindWheelRow(progress, wheel, () => changed(view));
   bindOnline(view, wheel);
-  bindRemove(view, wheel);
+  bindMoreOptions(view, wheel);
 }
+
+/** Re-render this tab without jumping back to the top. */
+const refresh = (view) => view.showTab('wheel', { keepScroll: true });
+const changed = (view) => {
+  view.changed();
+  refresh(view);
+};
 
 /** A wheel someone else hosts: who you are on it, and leaving it. */
 function renderJoined(view, wheel) {
   const me = store.activePlayer(wheel);
   view.body.innerHTML = `
     <h3>“${escapeHtml(store.wheelTitle(wheel))}”</h3>
-    <p>${me ? `You joined as <strong>${escapeHtml(displayName(me))}</strong>.` : 'You joined this wheel.'} It's hosted by someone else, so only they can change it.</p>
-    ${removeSection(wheel)}`;
+    <p>${me ? `You joined as <strong>${escapeHtml(displayName(me))}</strong>.` : 'You joined this wheel.'} Someone else runs it, so only they can change it.</p>
+    <button type="button" class="btn danger" id="w-remove-wheel">Leave this wheel</button>
+    <p class="hint">To come back later, scan the QR code again.</p>`;
   bindRemove(view, wheel);
 }
 
-// ================================================================ remove / leave
-
-function removeSection(wheel) {
-  const role = store.roleOf(wheel);
-  return `
-    <h3>${role === 'player' ? 'Leave this wheel' : 'Remove this wheel'}</h3>
-    <p class="hint">${
-      role === 'owner'
-        ? 'Removes it from this device with everyone’s progress. A snapshot is kept, so it can be undone from Backup.'
-        : role === 'host'
-          ? 'Removes it from this device only: it stays online for everyone else until it expires. To delete it from whirladay.com, take it offline first (above).'
-          : 'Removes it from this device. To come back, scan the QR code again; the host may need to release your name first.'
-    }</p>
-    <button type="button" class="btn danger" id="w-remove-wheel">${icon('trash-2', { size: 18 })} ${role === 'player' ? 'Leave wheel' : 'Remove wheel'}</button>`;
-}
-
-function bindRemove(view, wheel) {
-  $('#w-remove-wheel', view.body).addEventListener('click', async () => {
-    const role = store.roleOf(wheel);
-    const message =
-      role === 'owner'
-        ? `Remove “${store.wheelTitle(wheel)}” and everyone's progress on it? (A snapshot is kept, so this can be undone from Backup.)`
-        : role === 'host'
-          ? `Remove “${store.wheelTitle(wheel)}” from this device? It stays online for everyone else until it expires, and you can only manage it again with its host link.`
-          : `Leave “${store.wheelTitle(wheel)}”? To come back, scan the QR code again.`;
-    const ok = await confirmDialog(message, { title: role === 'player' ? 'Leave wheel?' : 'Remove wheel?', ok: role === 'player' ? 'Leave' : 'Remove', danger: true });
-    if (!ok || !store.getWheel(wheel.id)) return;
-    store.removeWheel(wheel.id);
-    view.changed();
-    view.close();
-  });
-}
-
-/** Re-render this tab without jumping back to the top. */
-const refresh = (view) => view.showTab('wheel', { keepScroll: true });
-
 // ================================================================ title, theme & rules
 
-function rulesSection(wheel) {
+function basicsSection(wheel) {
   const perDayChoices = [[0, 'No limit'], ...range(1, store.MAX_SPINS_PER_DAY).map((n) => [Number(n), `${n} per day`])];
   return `
     <div class="field">
-      <label for="w-title">Wheel title</label>
+      <label for="w-title">Title</label>
       <input id="w-title" maxlength="${store.MAX_TITLE_LENGTH}" placeholder="e.g. 12 Days of Christmas">
     </div>
 
@@ -94,17 +64,8 @@ function rulesSection(wheel) {
       <div class="theme-grid compact" id="w-themes" role="group" aria-labelledby="w-theme-label">${themeCards(wheel.theme)}</div>
     </div>
 
-    <div class="field">
-      <label for="w-preset">Start from a preset</label>
-      <div class="row">
-        <select id="w-preset"><option value="">Choose…</option>${presetOptions()}</select>
-        <button type="button" class="btn" id="w-preset-load">Load</button>
-      </div>
-      <p class="hint">Replaces this wheel's options and starts everyone's progress on it over.</p>
-    </div>
-
     <div class="toggles">
-      <label class="switch"><input type="checkbox" id="w-remove"><span>Remove each result once it's been spun</span></label>
+      <label class="switch"><input type="checkbox" id="w-remove"><span>Each option can only come up once</span></label>
     </div>
 
     <div class="field">
@@ -112,11 +73,11 @@ function rulesSection(wheel) {
       <select id="w-per-day">
         ${perDayChoices.map(([n, label]) => `<option value="${n}" ${n === (wheel.spinsPerDay ?? 0) ? 'selected' : ''}>${label}</option>`).join('')}
       </select>
-      <p class="hint">For example, 2 per day gets through a 24-number wheel in 12 days.</p>
+      <p class="hint">${wheel.sharedWheel && wheel.players.length ? 'For each person. ' : ''}For example, 2 per day gets through a 24-number wheel in 12 days.</p>
     </div>`;
 }
 
-function bindRules(view, wheel) {
+function bindBasics(view, wheel) {
   const title = $('#w-title', view.body);
   title.value = wheel.title;
   title.addEventListener('input', () => {
@@ -133,28 +94,12 @@ function bindRules(view, wheel) {
   removeAfterSpin.checked = wheel.removeAfterSpin;
   removeAfterSpin.addEventListener('change', () => {
     store.setWheelProps(wheel, { removeAfterSpin: removeAfterSpin.checked });
-    view.changed();
-    refresh(view);
+    changed(view);
   });
 
   $('#w-per-day', view.body).addEventListener('change', (event) => {
     store.setWheelProps(wheel, { spinsPerDay: Number(event.target.value) });
-    view.changed();
-    refresh(view);
-  });
-
-  $('#w-preset-load', view.body).addEventListener('click', async () => {
-    const presetId = $('#w-preset', view.body).value;
-    if (!presetId) return;
-    const ok = await confirmDialog(
-      `Replace the options on “${store.wheelTitle(wheel)}” with “${getPreset(presetId).name}” and start everyone's progress on it over?`,
-      { title: 'Load preset?', ok: 'Replace', danger: true },
-    );
-    const current = store.getWheel(wheel.id);
-    if (!ok || !current) return;
-    store.loadPreset(current, presetId);
-    view.changed();
-    refresh(view);
+    changed(view);
   });
 }
 
@@ -163,23 +108,9 @@ function bindRules(view, wheel) {
 function optionsSection() {
   return `
     <h3>Options <span class="count" id="w-count"></span></h3>
-    <p class="hint">Optionally add a surprise to each — it's revealed when that option is spun (e.g. “Hot cocoa movie night”).</p>
+    <p class="hint">Each option can hide a surprise that's shown when it comes up, like “Hot cocoa movie night”.</p>
     <ol class="option-list" id="w-options"></ol>
-    <div class="row wrap">
-      <button type="button" class="btn" id="w-add">${icon('plus', { size: 18 })} Add option</button>
-    </div>
-    <details class="more">
-      <summary>Add several at once</summary>
-      <div class="row wrap">
-        <span>Numbers</span>
-        <input type="number" id="w-from" value="1" class="num-input" aria-label="From">
-        <span>to</span>
-        <input type="number" id="w-to" value="12" class="num-input" aria-label="To">
-        <button type="button" class="btn" id="w-add-range">Add</button>
-      </div>
-      <textarea id="w-paste" rows="4" aria-label="Options to add, one per line" placeholder="Or paste a list — one option per line"></textarea>
-      <button type="button" class="btn" id="w-add-paste">Add list</button>
-    </details>`;
+    <button type="button" class="btn" id="w-add">${icon('plus', { size: 18 })} Add option</button>`;
 }
 
 function renderOptionRows(view, wheel) {
@@ -202,7 +133,7 @@ function renderOptionRows(view, wheel) {
           </li>`;
         })
         .join('')
-    : '<li class="empty-note">No options yet — add some below.</li>';
+    : '<li class="empty-note">No options yet. Add some below.</li>';
 
   // Values are set as properties, never through the HTML.
   list.querySelectorAll('.option-row').forEach((row, i) => {
@@ -211,42 +142,28 @@ function renderOptionRows(view, wheel) {
   });
 }
 
+/** Add as many labels as fit, and say so if some didn't. */
+function addOptions(view, wheel, labels) {
+  if (!labels.length) return [];
+  const room = store.optionRoom(wheel);
+  if (labels.length > room) {
+    alertDialog(`A wheel can have up to ${store.MAX_OPTIONS} options, so ${room ? `only the first ${plural(room, 'one')} fit` : "there's no room for more"}.`, {
+      title: 'Wheel is full',
+    });
+  }
+  const added = store.addOptions(wheel, labels);
+  view.changed();
+  renderOptionRows(view, wheel);
+  return added;
+}
+
 function bindOptions(view, wheel) {
   renderOptionRows(view, wheel);
 
-  /** Add as many labels as fit, and say so if some didn't. */
-  const add = (labels) => {
-    if (!labels.length) return [];
-    const room = store.optionRoom(wheel);
-    if (labels.length > room) {
-      alertDialog(`A wheel can have up to ${store.MAX_OPTIONS} options, so ${room ? `only the first ${plural(room, 'one')} fit` : "there's no room for more"}.`, {
-        title: 'Wheel is full',
-      });
-    }
-    const added = store.addOptions(wheel, labels);
-    view.changed();
-    renderOptionRows(view, wheel);
-    return added;
-  };
-
   $('#w-add', view.body).addEventListener('click', () => {
-    if (!add(['']).length) return;
+    if (!addOptions(view, wheel, ['']).length) return;
     const labels = view.body.querySelectorAll('.opt-label');
     labels[labels.length - 1]?.focus();
-  });
-  $('#w-add-range', view.body).addEventListener('click', () => {
-    const from = Math.trunc(Number($('#w-from', view.body).value));
-    const to = Math.trunc(Number($('#w-to', view.body).value));
-    if (!Number.isFinite(from) || !Number.isFinite(to) || to < from || to - from >= store.MAX_OPTIONS) {
-      alertDialog(`Pick a "from" and "to" with "to" at least as big as "from" (up to ${store.MAX_OPTIONS} numbers).`);
-      return;
-    }
-    add(range(from, to));
-  });
-  $('#w-add-paste', view.body).addEventListener('click', () => {
-    const area = $('#w-paste', view.body);
-    add(area.value.split('\n').map((line) => line.trim()).filter(Boolean));
-    area.value = '';
   });
 
   // One delegated listener per event, so re-rendering the rows doesn't lose them.
@@ -267,48 +184,25 @@ function bindOptions(view, wheel) {
   });
 }
 
-// ================================================================ progress
-//
-// With players, each one's progress tools are on their row in the Players tab. A shared wheel
-// without players has nobody to list, so its tools are here.
-
-function progressPointer() {
-  return `
-    <h3>Progress</h3>
-    <p class="hint">To undo a spin, give an extra spin or reset progress, go to Players.</p>
-    <button type="button" class="btn small" id="w-to-players">Go to Players</button>`;
-}
-
 // ================================================================ online
 
 function onlineSection(wheel) {
   if (!wheel.online) {
     return `
       <h3>Play on everyone's own devices</h3>
-      <p class="hint">Put this wheel online and everyone can spin on their own phone, tablet or computer: you share one QR code, and you see everyone's spins here.</p>
+      <p class="hint">Share one QR code, and everyone spins on their own phone, tablet or computer.</p>
       <button type="button" class="btn" id="w-put-online">${icon('cloud-upload', { size: 18 })} Put online…</button>`;
   }
   const status = online.connectionStatus(wheel);
   if (status === 'gone' || status === 'signed-out') {
     return `
       <h3>Online</h3>
-      <p class="hint">${status === 'gone' ? 'This wheel was deleted from whirladay.com.' : "This device isn't signed in to this wheel anymore. Open your host link here to manage it again."} You can keep the last copy as a wheel on this device.</p>
+      <p class="hint">${status === 'gone' ? 'This wheel was deleted from whirladay.com.' : "This device isn't signed in to this wheel anymore."} You can keep the last copy as a wheel on this device.</p>
       <button type="button" class="btn" id="w-keep-copy">Keep a copy on this device</button>`;
   }
   return `
     <h3>Online</h3>
-    <p class="hint">${wheel.sharedWheel ? 'One wheel for everyone: every spin plays on every screen.' : 'Everyone gets their own wheel.'} It lives on whirladay.com and is deleted automatically 60 days after it was last used.</p>
-    <div class="toggles">
-      ${wheel.sharedWheel
-        ? `<label class="switch"><input type="checkbox" id="w-group-limit" ${wheel.spinsPerDay ? '' : 'disabled'}><span>The whole group shares the day's spins</span></label>`
-        : '<label class="switch"><input type="checkbox" id="w-share-spins"><span>Players see each other’s spins</span></label>'}
-    </div>
-    ${wheel.sharedWheel && !wheel.spinsPerDay ? '' : `<p class="hint">${wheel.sharedWheel ? 'Off: each person gets the spins per day. On: that many for the whole group, first come, first served.' : 'Off: only you see everyone’s spins. On: each player also sees the others’ results (not their surprises).'}</p>`}
-    <div class="row wrap">
-      <button type="button" class="btn" id="w-host-link">${icon('link', { size: 18 })} Host link</button>
-      <button type="button" class="btn danger" id="w-take-offline">Take offline…</button>
-    </div>
-    <p class="hint">The host link lets you manage this wheel from another device. Taking it offline deletes it from whirladay.com and keeps it here.</p>`;
+    <p class="hint">${wheel.sharedWheel ? 'One wheel for everyone.' : 'Everyone has their own copy.'} Deleted automatically 60 days after it was last used.</p>`;
 }
 
 function bindOnline(view, wheel) {
@@ -320,25 +214,85 @@ function bindOnline(view, wheel) {
     keepLocalCopy(wheel);
     refresh(view);
   });
-  const groupLimit = $('#w-group-limit', view.body);
-  if (groupLimit) {
-    groupLimit.checked = wheel.sharedDailyLimit === true;
-    groupLimit.addEventListener('change', () => {
-      store.setWheelProps(wheel, { sharedDailyLimit: groupLimit.checked });
-      view.changed();
-      refresh(view);
-    });
-  }
-  const shareSpins = $('#w-share-spins', view.body);
-  if (shareSpins) {
-    shareSpins.checked = wheel.showSpinsToEveryone === true;
-    shareSpins.addEventListener('change', () => {
-      store.setWheelProps(wheel, { showSpinsToEveryone: shareSpins.checked });
-      view.changed();
-    });
-  }
+}
+
+// ================================================================ more options
+
+function moreOptions(wheel) {
+  const host = store.roleOf(wheel) === 'host' && !store.isSignedOut(wheel) && online.connectionStatus(wheel) !== 'gone';
+  return `
+    <details class="more">
+      <summary>More options</summary>
+
+      <h3>Add several options at once</h3>
+      <div class="row wrap">
+        <span>Numbers</span>
+        <input type="number" id="w-from" value="1" class="num-input" aria-label="From">
+        <span>to</span>
+        <input type="number" id="w-to" value="12" class="num-input" aria-label="To">
+        <button type="button" class="btn" id="w-add-range">Add</button>
+      </div>
+      <textarea id="w-paste" rows="4" aria-label="Options to add, one per line" placeholder="Or paste a list, one option per line"></textarea>
+      <button type="button" class="btn" id="w-add-paste">Add list</button>
+
+      ${
+        host
+          ? `<h3>Manage from another device</h3>
+             <p class="hint">Get a private link that opens this wheel, with all its controls, on another phone or computer. Save it somewhere safe in case you lose this device.</p>
+             <button type="button" class="btn" id="w-host-link">${icon('link', { size: 18 })} Get the link</button>
+
+             <h3>Stop sharing online</h3>
+             <p class="hint">Deletes the wheel from whirladay.com so nobody else can use it, and keeps it on this device with everyone's progress.</p>
+             <button type="button" class="btn danger" id="w-take-offline">Stop sharing…</button>`
+          : ''
+      }
+
+      <h3>Remove this wheel</h3>
+      <p class="hint">${
+        wheel.online
+          ? 'Removes it from this device only. It stays online for everyone else until it expires.'
+          : 'Removes it and everyone’s progress from this device. You can bring it back from Backup.'
+      }</p>
+      <button type="button" class="btn danger" id="w-remove-wheel">${icon('trash-2', { size: 18 })} Remove wheel</button>
+    </details>`;
+}
+
+function bindMoreOptions(view, wheel) {
+  $('#w-add-range', view.body).addEventListener('click', () => {
+    const from = Math.trunc(Number($('#w-from', view.body).value));
+    const to = Math.trunc(Number($('#w-to', view.body).value));
+    if (!Number.isFinite(from) || !Number.isFinite(to) || to < from || to - from >= store.MAX_OPTIONS) {
+      alertDialog(`Pick a "from" and "to" with "to" at least as big as "from" (up to ${store.MAX_OPTIONS} numbers).`);
+      return;
+    }
+    addOptions(view, wheel, range(from, to));
+  });
+  $('#w-add-paste', view.body).addEventListener('click', () => {
+    const area = $('#w-paste', view.body);
+    addOptions(view, wheel, area.value.split('\n').map((line) => line.trim()).filter(Boolean));
+    area.value = '';
+  });
   $('#w-host-link', view.body)?.addEventListener('click', () => showHostLink(wheel));
   $('#w-take-offline', view.body)?.addEventListener('click', async () => {
     if (await takeOffline(wheel)) refresh(view);
+  });
+  bindRemove(view, wheel);
+}
+
+function bindRemove(view, wheel) {
+  $('#w-remove-wheel', view.body).addEventListener('click', async () => {
+    const role = store.roleOf(wheel);
+    const title = store.wheelTitle(wheel);
+    const message =
+      role === 'owner'
+        ? `Remove “${title}” and everyone's progress on it? You can bring it back from Backup.`
+        : role === 'host'
+          ? `Remove “${title}” from this device? It stays online for everyone else until it expires. To manage it again you'd need its link from “Manage from another device”.`
+          : `Leave “${title}”? To come back, scan the QR code again.`;
+    const ok = await confirmDialog(message, { title: role === 'player' ? 'Leave wheel?' : 'Remove wheel?', ok: role === 'player' ? 'Leave' : 'Remove', danger: true });
+    if (!ok || !store.getWheel(wheel.id)) return;
+    store.removeWheel(wheel.id);
+    view.changed();
+    view.close();
   });
 }

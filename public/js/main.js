@@ -119,8 +119,11 @@ function syncFromStorage() {
     return false;
   }
   // Dialogs stay open: settings redraws from the fresh data, and every other dialog looks its
-  // wheel up again by id when it acts.
+  // wheel up again by id when it acts. This tab stays on the wheel it was showing, even if the
+  // other tab switched to a different one.
+  const showing = store.getState().activeWheelId;
   store.load();
+  store.setActiveWheel(showing, { save: false });
   refreshSettings();
   render();
   return true;

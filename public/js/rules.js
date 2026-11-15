@@ -237,16 +237,6 @@ const ACTIONS = {
     wheel.options = wheel.options.filter((o) => o.id !== id);
   },
 
-  /** Swap in a new set of options and rules (a preset) and start everyone over. */
-  'replace-options'(wheel, { options, removeAfterSpin, spinsPerDay }) {
-    if (!Array.isArray(options)) throw new RuleError('bad-request');
-    wheel.options = [];
-    ACTIONS['add-options'](wheel, { options });
-    ACTIONS['set-props'](wheel, { removeAfterSpin, spinsPerDay });
-    wheel.spins = [];
-    wheel.bonusSpins = [];
-  },
-
   'add-player'(wheel, { id, name }) {
     if (wheel.players.length >= MAX_PLAYERS) throw new RuleError('too-many-players');
     const player = { id: freshId(id, new Set(wheel.players.map((p) => p.id))), name: text(name, MAX_NAME_LENGTH) };
@@ -257,10 +247,6 @@ const ACTIONS = {
   'rename-player'(wheel, { id, name }) {
     const player = findPlayer(wheel, id);
     if (player) player.name = text(name, MAX_NAME_LENGTH);
-  },
-
-  'move-player'(wheel, { id, delta }) {
-    moveItem(wheel.players, id, delta);
   },
 
   /**
@@ -314,13 +300,6 @@ export function applyAction(wheel, name, args, { now = new Date() } = {}) {
 }
 
 export const optionRoom = (wheel) => MAX_OPTIONS - wheel.options.length;
-
-function moveItem(list, id, delta) {
-  const i = list.findIndex((x) => x.id === id);
-  const j = i + Math.sign(Number(delta) || 0);
-  if (i < 0 || j < 0 || j >= list.length || i === j) return;
-  [list[i], list[j]] = [list[j], list[i]];
-}
 
 // ================================================================ Validation
 

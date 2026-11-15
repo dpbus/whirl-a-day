@@ -91,6 +91,8 @@ function showTab(tab, { keepScroll = false } = {}) {
   for (const [name, shown] of Object.entries(available)) tabBar.querySelector(`[data-tab="${name}"]`).hidden = !shown;
   const { body } = view;
   const scrollTop = body.scrollTop;
+  // Redrawing the same tab keeps any "More options" panels that were open.
+  const openPanels = keepScroll ? [...body.querySelectorAll('details')].map((d) => d.open) : [];
 
   for (const button of tabBar.querySelectorAll('[data-tab]')) {
     const selected = button.dataset.tab === tab;
@@ -100,6 +102,9 @@ function showTab(tab, { keepScroll = false } = {}) {
   body.setAttribute('aria-labelledby', `settings-tab-${tab}`);
   body.innerHTML = '';
   TABS[tab].render(view);
+  body.querySelectorAll('details').forEach((d, i) => {
+    if (openPanels[i]) d.open = true;
+  });
   body.scrollTop = keepScroll ? scrollTop : 0;
 }
 

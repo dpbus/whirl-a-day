@@ -87,12 +87,6 @@ test('removing a wheel or player can be undone from a snapshot', () => {
   assert.equal(store.activeWheel().spins.length, 1);
 });
 
-test('moving players reorders them', () => {
-  const { wheel, ben } = advent();
-  store.movePlayer(wheel, ben, -1);
-  assert.deepEqual(wheel.players.map((p) => p.name), ['Ben', 'Ava']);
-});
-
 // ------------------------------------------------------------ spinning
 
 test('a spin removes the result from that player only', () => {
@@ -113,17 +107,6 @@ test('one spin per day locks, an extra spin unlocks once, undo gives it back', (
   assert.equal(store.spinStatus(wheel, ava).reason, 'locked');
   store.undoLastSpin(wheel, ava);
   assert.equal(store.spinsLeftToday(wheel, ava), 1);
-});
-
-test('loading a preset resets every player on that wheel', () => {
-  const { wheel, ava, ben } = advent();
-  spinFirst(wheel, ava);
-  spinFirst(wheel, ben);
-  store.loadPreset(wheel, 'advent-24');
-  assert.equal(wheel.options.length, 24);
-  assert.equal(wheel.spins.length, 0);
-  assert.equal(store.spinPool(wheel, ava).length, 24);
-  assert.match(store.listSnapshots()[0].reason, /preset/);
 });
 
 test('adding the first player clears shared spins (after a snapshot); removing the last starts fresh', () => {
@@ -389,6 +372,14 @@ test('reset and erase can be undone from snapshots (by timestamp); summaries des
   store.restoreSnapshot(store.listSnapshots()[0].at);
   assert.equal(store.getState().wheels.length, 2);
   assert.throws(() => store.restoreSnapshot('no-such-time'), /no longer exists/);
+});
+
+test('choosing a wheel without saving keeps the choice to this tab', () => {
+  const { wheel } = advent();
+  const dinner = store.addWheel({ presetId: 'dinner' });
+  store.setActiveWheel(wheel.id, { save: false });
+  assert.equal(store.activeWheel(), wheel);
+  assert.equal(raw().activeWheelId, dinner.id);
 });
 
 test('changes from another tab are detected', () => {
