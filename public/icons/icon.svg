@@ -1,20 +1,13 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="112" fill="#0b2e1f"/>
-  <g transform="translate(256 276)">
-    <circle r="196" fill="#7d0a1c"/>
-    <path d="M0 0 L0 -176 A176 176 0 0 1 124.45 -124.45 Z" fill="#c62828"/>
-    <path d="M0 0 L124.45 -124.45 A176 176 0 0 1 176 0 Z" fill="#2e7d32"/>
-    <path d="M0 0 L176 0 A176 176 0 0 1 124.45 124.45 Z" fill="#fff3e0"/>
-    <path d="M0 0 L124.45 124.45 A176 176 0 0 1 0 176 Z" fill="#f2b81c"/>
-    <path d="M0 0 L0 176 A176 176 0 0 1 -124.45 124.45 Z" fill="#c62828"/>
-    <path d="M0 0 L-124.45 124.45 A176 176 0 0 1 -176 0 Z" fill="#2e7d32"/>
-    <path d="M0 0 L-176 0 A176 176 0 0 1 -124.45 -124.45 Z" fill="#fff3e0"/>
-    <path d="M0 0 L-124.45 -124.45 A176 176 0 0 1 0 -176 Z" fill="#f2b81c"/>
-    <g fill="#ffd54f">
-      <circle cx="0" cy="-186" r="6"/><circle cx="131.5" cy="-131.5" r="6"/><circle cx="186" cy="0" r="6"/><circle cx="131.5" cy="131.5" r="6"/>
-      <circle cx="0" cy="186" r="6"/><circle cx="-131.5" cy="131.5" r="6"/><circle cx="-186" cy="0" r="6"/><circle cx="-131.5" cy="-131.5" r="6"/>
-    </g>
-    <circle r="34" fill="#fff8ec" stroke="#7d0a1c" stroke-width="6"/>
-  </g>
-  <path d="M256 128 L226 62 A32 32 0 1 1 286 62 Z" fill="#f2c14e"/>
+  <!-- The app icon: the same rainbow wheel as favicon.svg, with more detail. -->
+  <rect width="512" height="512" rx="112" fill="#f4f4f7"/>
+  <circle cx="256" cy="256" r="208" fill="#1f2430"/>
+  <path d="M256 256L167.00 101.85A178 178 0 0 1 345.00 101.85Z" fill="#ef4444"/>
+  <path d="M256 256L345.00 101.85A178 178 0 0 1 434.00 256.00Z" fill="#f97316"/>
+  <path d="M256 256L434.00 256.00A178 178 0 0 1 345.00 410.15Z" fill="#facc15"/>
+  <path d="M256 256L345.00 410.15A178 178 0 0 1 167.00 410.15Z" fill="#22c55e"/>
+  <path d="M256 256L167.00 410.15A178 178 0 0 1 78.00 256.00Z" fill="#3b82f6"/>
+  <path d="M256 256L78.00 256.00A178 178 0 0 1 167.00 101.85Z" fill="#a855f7"/>
+  <path d="M256 256L167.00 101.85M256 256L345.00 101.85M256 256L434.00 256.00M256 256L345.00 410.15M256 256L167.00 410.15M256 256L78.00 256.00" stroke="#ffffff" stroke-opacity="0.85" stroke-width="6"/>
+  <circle cx="256" cy="256" r="40" fill="#ffffff" stroke="#1f2430" stroke-width="16"/>
 </svg>
