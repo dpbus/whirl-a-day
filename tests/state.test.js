@@ -4,8 +4,8 @@ import assert from 'node:assert/strict';
 import { freshStorage } from './helpers.js';
 
 let storage = freshStorage();
-const store = await import('../js/state.js');
-const { todayKey } = await import('../js/util.js');
+const store = await import('../public/js/state.js');
+const { todayKey } = await import('../public/js/util.js');
 
 const today = todayKey();
 const KEY = store.STORAGE_KEY;

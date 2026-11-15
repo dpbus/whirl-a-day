@@ -1,0 +1,13 @@
+{
+  // Assets-only Worker: there is no `main`, so Cloudflare simply serves everything in
+  // ./public as static files. There is no build step. public/_headers adds security headers.
+  //
+  // Deployed by Cloudflare Workers Builds on every push to main (see README).
+  "name": "whirl-a-day",
+  "compatibility_date": "2026-11-01",
+  "assets": {
+    "directory": "./public"
+  },
+  // Requires whirladay.com to be a zone in the same Cloudflare account.
+  "routes": [{ "pattern": "whirladay.com", "custom_domain": true }]
+}

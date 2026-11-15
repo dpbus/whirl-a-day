@@ -3,7 +3,7 @@ import confetti from './vendor/canvas-confetti-1.9.4.js';
 import { prefersReducedMotion } from './util.js';
 
 // ---------------------------------------------------------------- Sound
-// Real recordings from the VSCO 2 Community Edition library (CC0). See sounds/README.md.
+// Real recordings from the VSCO 2 Community Edition library (CC0). See docs/sounds.md in the repo.
 
 const SOUND_FILES = {
   woodA: 'sounds/tick-wood-1.wav',

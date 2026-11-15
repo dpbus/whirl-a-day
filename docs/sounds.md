@@ -1,5 +1,7 @@
 # Sounds
 
+The files live in `public/sounds/`.
+
 All recordings come from the **VS Chamber Orchestra: Community Edition (VSCO 2 CE)** sample library
 by Sam Gossner & Simon Dalzell, released under **CC0 1.0** (public domain):
 https://github.com/sgossner/VSCO-2-CE
@@ -15,7 +17,7 @@ https://github.com/sgossner/VSCO-2-CE
 
 The glockenspiel files sound one octave above their names; pitches above were measured. Other
 notes (music-box tick, win tunes) are made by re-pitching the nearest glockenspiel sample in
-`js/effects.js`.
+`public/js/effects.js`.
 
 ## How they were made
 
@@ -37,4 +39,4 @@ loudnorm=I=-20:TP=-2:LRA=11,aresample=24000" -ac 1 -c:a pcm_s16le OUT.wav
 | glock-g5, glock-c6 | 0.004 | 2.2 | 1.4 | |
 | glock-g6 | 0.004 | 2.0 | 1.3 | |
 
-To swap a sound, replace the file (keep the name) or change `SOUND_FILES` in `js/effects.js`.
+To swap a sound, replace the file (keep the name) or change `SOUND_FILES` in `public/js/effects.js`.

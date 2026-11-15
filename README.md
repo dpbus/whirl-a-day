@@ -45,18 +45,34 @@ home-screen version (or move your progress over with a backup file).
 
 ## Running it
 
-It's plain HTML, CSS and JavaScript, with no build step and no dependencies. It needs to be
+It's plain HTML, CSS and JavaScript, with no build step and no dependencies. The website is the
+`public/` folder; everything outside it (docs, tests, config) stays in the repo. It needs to be
 served over HTTP rather than opened as a file, because it uses JavaScript modules:
 
 ```sh
-npm start        # same as: python3 -m http.server 8765
+npm start        # same as: python3 -m http.server 8765 --directory public
 ```
 
 Then open http://localhost:8765.
 
-To put it online, upload the folder to any static host (Cloudflare, Netlify, GitHub Pages and so
-on). Updates reach people right away: the service worker checks the network first and only uses
-its offline copy when the connection is down or very slow.
+Updates reach people right away: the service worker checks the network first and only uses its
+offline copy when the connection is down or very slow.
+
+### Deploying
+
+whirladay.com runs on Cloudflare as an assets-only Worker (`wrangler.jsonc`), deployed by
+Cloudflare Workers Builds on every push to `main`. One-time setup in the Cloudflare dashboard:
+
+1. **Workers & Pages → Create → Import a repository**, and pick this repo.
+2. Project name: `whirl-a-day` (it must match `name` in `wrangler.jsonc`).
+3. Leave the build command empty. The deploy command is `npx wrangler deploy` (the default), and
+   the production branch is `main`.
+
+The custom domain comes from `routes` in `wrangler.jsonc`, so the domain has to be in the same
+Cloudflare account. Other branches get preview URLs.
+
+Only `public/` is uploaded, and `public/_headers` adds security headers to every response. Any
+other static host works too: just upload `public/`.
 
 ### Tests
 
@@ -65,7 +81,7 @@ npm test
 ```
 
 This uses Node's built-in test runner, so there's nothing to install. The tests cover the data
-layer in `js/state.js`: the spinning rules, saving, backups, migrations from older versions, the
+layer in `public/js/state.js`: the spinning rules, saving, backups, migrations from older versions, the
 safety nets above, and damaged or deliberately malicious backup files.
 
 ## Notes for contributors
@@ -73,7 +89,7 @@ safety nets above, and damaged or deliberately malicious backup files.
 - **Spins are decided before the wheel moves.** The result is picked with
   `crypto.getRandomValues` and saved immediately, then the animation lands on it. Refreshing
   mid-spin can't re-roll.
-- **Saved data has a version.** If you change its shape, bump `SCHEMA_VERSION` in `state.js`
+- **Saved data has a version.** If you change its shape, bump `SCHEMA_VERSION` in `public/js/state.js`
   and teach `normalize()` to read the old shape, so existing saves and backup files keep
   working. (Version 3 added multiple wheels; `migratePlayersToWheels()` converts older saves.)
   Storage keys still start with `spinner.`, from before the app had a name; changing them would
@@ -81,14 +97,14 @@ safety nets above, and damaged or deliberately malicious backup files.
 - **Anything from storage or a backup file is untrusted.** It all goes through `normalize()`,
   which checks every field and caps sizes. Anything a user typed is escaped (`escapeHtml()`) or
   set with `textContent`/`.value` before it reaches the page.
-- **The Content-Security-Policy** in `index.html` only allows the app's own files, with no inline
+- **The Content-Security-Policy** in `public/index.html` (and `public/_headers`) only allows the app's own files, with no inline
   scripts or `style=""` attributes. Set styles from JavaScript instead.
-- **If you add a file the app needs offline,** list it in `CORE_FILES` in `sw.js`.
+- **If you add a file the app needs offline,** list it in `CORE_FILES` in `public/sw.js`.
 
 ## Credits
 
 - Sounds from [VS Chamber Orchestra: Community Edition](https://github.com/sgossner/VSCO-2-CE)
-  by Sam Gossner and Simon Dalzell (CC0). `sounds/README.md` explains how they were trimmed.
+  by Sam Gossner and Simon Dalzell (CC0). `docs/sounds.md` explains how they were trimmed.
 - Icons from [Lucide](https://lucide.dev) (ISC).
 - Confetti by [canvas-confetti](https://github.com/catdad/canvas-confetti) from Kiril Vatev (ISC).
 - Fonts via [Fontsource](https://fontsource.org): Fredoka and Creepster (OFL 1.1), Mountains of
