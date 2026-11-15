@@ -1,0 +1,11 @@
+{
+  "name": "whirl-a-day",
+  "private": true,
+  "license": "MIT",
+  "description": "Spinner wheels that remember what each player has already spun: advent calendars, chore wheels, dinner pickers.",
+  "type": "module",
+  "scripts": {
+    "start": "python3 -m http.server 8765",
+    "test": "node --test tests/"
+  }
+}
