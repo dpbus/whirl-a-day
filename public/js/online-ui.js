@@ -154,7 +154,7 @@ export function showHostLink(wheel) {
     'small',
     `<form method="dialog" class="dialog-body">
       <h2 id="${titleId}">Host link</h2>
-      <p>Open this link on another phone or computer to manage “${escapeHtml(wheelTitle(wheel))}” from there too. Save it somewhere safe, like your notes or email to yourself, in case you lose this phone.</p>
+      <p>Open this link on another device to manage “${escapeHtml(wheelTitle(wheel))}” from there too. Save it somewhere safe, like your notes or email to yourself, in case you lose this one.</p>
       <p class="hint"><strong>Keep it private:</strong> anyone with this link can change the wheel and see every surprise.</p>
       <input class="link-field" readonly aria-label="Host link">
       ${linkButtons()}
@@ -175,8 +175,8 @@ export function putOnline(wheel) {
   const dialog = makeDialog(
     'small',
     `<form method="dialog" class="dialog-body">
-      <h2 id="${titleId}">Play on everyone's phones</h2>
-      <p>Put “${escapeHtml(wheelTitle(wheel))}” online and everyone can spin on their own phone. You'll get one QR code to share.</p>
+      <h2 id="${titleId}">Play on everyone's own devices</h2>
+      <p>Put “${escapeHtml(wheelTitle(wheel))}” online and everyone can spin on their own phone, tablet or computer. You'll get one QR code to share.</p>
       <fieldset class="choices">
         <legend class="field-label">How should it work?</legend>
         <label class="choice">
@@ -185,7 +185,7 @@ export function putOnline(wheel) {
         </label>
         <label class="choice">
           <input type="radio" name="kind" value="shared" ${wheel.sharedWheel ? 'checked' : ''}>
-          <span><strong>One wheel for everyone</strong><span class="hint">Like game night: every spin plays on every phone, and the history shows who spun.</span></span>
+          <span><strong>One wheel for everyone</strong><span class="hint">Like game night: every spin plays on every screen, and the history shows who spun.</span></span>
         </label>
       </fieldset>
       ${names.length ? `<p class="hint">${escapeHtml(names.join(', '))} will be on the list for people to tap when they join.</p>` : ''}
@@ -260,7 +260,7 @@ export function showInvite(wheel, { justCreated = false } = {}) {
     'small invite',
     `<form method="dialog" class="dialog-body">
       <h2 id="${titleId}">${justCreated ? 'It’s online! ' : ''}Invite people</h2>
-      <p>Scan with a phone camera to join “${escapeHtml(wheelTitle(wheel))}”:</p>
+      <p>Scan with a camera, or open the link below, to join “${escapeHtml(wheelTitle(wheel))}”:</p>
       <div class="qr-box">${qrSvg(link, { label: `QR code for ${link}` })}</div>
       <p class="join-link">${escapeHtml(link.replace(/^https?:\/\//, ''))}</p>
       ${linkButtons()}
@@ -307,7 +307,7 @@ export function hostAction(wheel, name, args) {
 /** Delete the wheel from the server and keep it as a wheel on this device. */
 export async function takeOffline(wheel) {
   const ok = await confirmDialog(
-    `Take “${wheelTitle(wheel)}” offline? It's deleted from whirladay.com, other phones lose it, and it becomes a wheel on this device with everyone's progress so far.`,
+    `Take “${wheelTitle(wheel)}” offline? It's deleted from whirladay.com, everyone else loses it, and it becomes a wheel on this device with everyone's progress so far.`,
     { title: 'Take offline?', ok: 'Take offline', danger: true },
   );
   if (!ok) return false;
@@ -340,7 +340,7 @@ export function statusText(wheel, status) {
     case 'signed-out':
       return role === 'host'
         ? "This device isn't signed in to this wheel. Open your host link here to manage it again."
-        : "This phone isn't signed in to this wheel anymore. Scan the QR code again to rejoin.";
+        : "This device isn't signed in to this wheel anymore. Scan the QR code again to rejoin.";
     case 'gone':
       return role === 'host'
         ? 'This wheel was deleted from whirladay.com. You can keep a copy on this device from Settings → This wheel.'

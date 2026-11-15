@@ -60,9 +60,9 @@ export function playModeField() {
   return `
     <fieldset class="choices">
       <legend class="field-label">How will you play?</legend>
-      ${choice('local', 'On this device', 'Take turns on one phone or tablet. Everything stays on this device.', true)}
-      ${choice('individual', "On everyone's phones, each their own wheel", 'Like an advent calendar: share a QR code, and each person works through their own copy. You see everyone’s progress.')}
-      ${choice('shared', "On everyone's phones, one wheel", 'Like game night: every spin plays on every phone, and the history shows who spun.')}
+      ${choice('local', 'On this device', 'Take turns on this one device. Everything stays here.', true)}
+      ${choice('individual', "On everyone's own devices, each their own wheel", 'Like an advent calendar: share a QR code, and each person works through their own copy. You see everyone’s progress.')}
+      ${choice('shared', "On everyone's own devices, one wheel", 'Like game night: every spin plays on every screen, and the history shows who spun.')}
     </fieldset>`;
 }
 

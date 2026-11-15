@@ -122,7 +122,7 @@ function renderPlayerList(view, wheel) {
     if (!event.target.closest('[data-release]')) return;
     const player = store.findPlayer(wheel, event.target.closest('[data-id]').dataset.id);
     const ok = await confirmDialog(
-      `Release ${displayName(player)}'s name? The phone that joined as ${displayName(player)} is signed out, and their progress stays. Then they (or a new phone) can scan the QR code and tap the name again.`,
+      `Release ${displayName(player)}'s name? The device that joined as ${displayName(player)} is signed out, and their progress stays. Then they (or a new device) can scan the QR code and tap the name again.`,
       { title: 'Release name?', ok: 'Release' },
     );
     if (!ok || !store.getWheel(wheel.id)) return;
@@ -145,7 +145,7 @@ function renderPlayerList(view, wheel) {
       const becomesShared = !wheel.online && wheel.players.length === 1 ? ' With no players left, it becomes a shared wheel.' : '';
       const undo = wheel.online
         ? player.claimed
-          ? ' Their phone is signed out.'
+          ? ' Their device is signed out.'
           : ''
         : ' (A snapshot is kept, so this can be undone from Backup.)';
       const ok = await confirmDialog(`Remove ${displayName(player)} and their spins on this wheel?${becomesShared}${undo}`, {
@@ -175,7 +175,7 @@ function addPlayerForm(wheel) {
       </div>
       ${
         wheel.online && !wheel.online.hostPlayerId
-          ? `<div class="toggles"><label class="switch"><input type="checkbox" id="p-me"><span>This is me: I'm playing too, from this phone</span></label></div>`
+          ? `<div class="toggles"><label class="switch"><input type="checkbox" id="p-me"><span>This is me: I'm playing too, from this device</span></label></div>`
           : ''
       }
       <button class="btn primary">${wheel.online ? 'Add name' : 'Add player'}</button>

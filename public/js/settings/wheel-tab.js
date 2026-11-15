@@ -33,7 +33,7 @@ function renderJoined(view, wheel) {
   const me = store.activePlayer(wheel);
   view.body.innerHTML = `
     <h3>“${escapeHtml(store.wheelTitle(wheel))}”</h3>
-    <p>${me ? `You joined as <strong>${escapeHtml(displayName(me))}</strong>.` : 'You joined this wheel.'} It's hosted on someone else's phone, so only they can change it.</p>
+    <p>${me ? `You joined as <strong>${escapeHtml(displayName(me))}</strong>.` : 'You joined this wheel.'} It's hosted by someone else, so only they can change it.</p>
     ${removeSection(wheel)}`;
   bindRemove(view, wheel);
 }
@@ -48,8 +48,8 @@ function removeSection(wheel) {
       role === 'owner'
         ? 'Removes it from this device with everyone’s progress. A snapshot is kept, so it can be undone from Backup.'
         : role === 'host'
-          ? 'Removes it from this device only: it stays online for the other phones until it expires. To delete it from whirladay.com, take it offline first (above).'
-          : 'Removes it from this phone. To come back, scan the QR code again; the host may need to release your name first.'
+          ? 'Removes it from this device only: it stays online for everyone else until it expires. To delete it from whirladay.com, take it offline first (above).'
+          : 'Removes it from this device. To come back, scan the QR code again; the host may need to release your name first.'
     }</p>
     <button type="button" class="btn danger" id="w-remove-wheel">${icon('trash-2', { size: 18 })} ${role === 'player' ? 'Leave wheel' : 'Remove wheel'}</button>`;
 }
@@ -61,7 +61,7 @@ function bindRemove(view, wheel) {
       role === 'owner'
         ? `Remove “${store.wheelTitle(wheel)}” and everyone's progress on it? (A snapshot is kept, so this can be undone from Backup.)`
         : role === 'host'
-          ? `Remove “${store.wheelTitle(wheel)}” from this device? It stays online for the other phones until it expires, and you can only manage it again with its host link.`
+          ? `Remove “${store.wheelTitle(wheel)}” from this device? It stays online for everyone else until it expires, and you can only manage it again with its host link.`
           : `Leave “${store.wheelTitle(wheel)}”? To come back, scan the QR code again.`;
     const ok = await confirmDialog(message, { title: role === 'player' ? 'Leave wheel?' : 'Remove wheel?', ok: role === 'player' ? 'Leave' : 'Remove', danger: true });
     if (!ok || !store.getWheel(wheel.id)) return;
@@ -362,8 +362,8 @@ function bindProgress(view, wheel) {
 function onlineSection(wheel) {
   if (!wheel.online) {
     return `
-      <h3>Play on everyone's phones</h3>
-      <p class="hint">Put this wheel online and everyone can spin on their own phone: you share one QR code, and you see everyone's spins here.</p>
+      <h3>Play on everyone's own devices</h3>
+      <p class="hint">Put this wheel online and everyone can spin on their own phone, tablet or computer: you share one QR code, and you see everyone's spins here.</p>
       <button type="button" class="btn" id="w-put-online">${icon('cloud-upload', { size: 18 })} Put online…</button>`;
   }
   const status = online.connectionStatus(wheel);
@@ -375,7 +375,7 @@ function onlineSection(wheel) {
   }
   return `
     <h3>Online</h3>
-    <p class="hint">${wheel.sharedWheel ? 'One wheel for everyone: every spin plays on every phone.' : 'Everyone gets their own wheel.'} It lives on whirladay.com and is deleted automatically 60 days after it was last used.</p>
+    <p class="hint">${wheel.sharedWheel ? 'One wheel for everyone: every spin plays on every screen.' : 'Everyone gets their own wheel.'} It lives on whirladay.com and is deleted automatically 60 days after it was last used.</p>
     <div class="toggles">
       ${wheel.sharedWheel
         ? `<label class="switch"><input type="checkbox" id="w-group-limit" ${wheel.spinsPerDay ? '' : 'disabled'}><span>The whole group shares the day's spins</span></label>`

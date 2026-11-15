@@ -436,8 +436,8 @@ async function confirmSpinForSomeoneElse(wheel, playerId) {
   if (store.roleOf(wheel) !== 'host' || !playerId || store.isHostPlayer(wheel, playerId)) return true;
   const player = store.findPlayer(wheel, playerId);
   const name = displayName(player);
-  const why = player?.claimed ? `${name} usually spins on their own phone.` : `${name} hasn't joined from a phone yet.`;
-  return confirmDialog(`${why} Spin for ${name} from this phone?`, { title: `Spin for ${name}?`, ok: 'Spin for them' });
+  const why = player?.claimed ? `${name} usually spins on their own device.` : `${name} hasn't joined from their own device yet.`;
+  return confirmDialog(`${why} Spin for ${name} from here?`, { title: `Spin for ${name}?`, ok: 'Spin for them' });
 }
 
 /** A spin decided by the server (this phone's, or someone else's). */

@@ -19,10 +19,10 @@ out to be handy for other things too, like a chore wheel or settling "what's for
   players for a wheel the whole family shares.
 - **Set the rules:** results can come off the wheel once they're spun, and you can limit spins
   per day (one a day for an advent calendar, unlimited for dinner).
-- **Play on everyone's phones.** Put a wheel online and share one QR code. Each person scans
-  it, taps their name, and spins on their own phone. Either everyone gets their own copy (an
+- **Play on everyone's own devices.** Put a wheel online and share one QR code. Each person
+  scans it, taps their name, and spins on their own phone, tablet or computer. Either everyone gets their own copy (an
   advent calendar for each kid, and you see everyone's progress), or it's one wheel for the whole
-  group, where every spin plays on every phone and the history shows who spun what (game night).
+  group, where every spin plays on every screen and the history shows who spun what (game night).
 - **Keep as many wheels as you like** and switch between them from the title at the top. Each
   one has its own theme: Christmas, Winter Wonderland, Halloween, Birthday, Classic or Midnight.
 - **Grown-up settings** can sit behind an optional PIN so nobody gives themselves an extra spin.
@@ -48,7 +48,7 @@ options and surprises, the names people type, and the spin history. Nothing else
 accounts, emails, IP addresses or analytics. It's deleted automatically 60 days after its last
 spin, join or change, or straight away when the host takes it offline. Players
 only ever receive their own surprises once they've spun them. Sign-in tokens for online wheels
-stay on each phone and are never written to backup files.
+stay on each device and are never written to backup files.
 
 **On an iPhone or iPad,** use Share → *Add to Home Screen* and open it from there. Safari may
 clear a website's data if you haven't visited for a week, but home-screen apps are left alone.
@@ -68,7 +68,7 @@ npm start        # wrangler dev: the site and the server, at http://localhost:87
 
 Without the server (local wheels only), `npm run start:static` serves `public/` with Python.
 
-To try online wheels with two "phones" on one computer, open the host at
+To try online wheels with two "devices" on one computer, open the host at
 http://localhost:8765 and the join link at `http://127.0.0.1:8765/j/<code>`. The two addresses
 keep separate storage, like two devices.
 
@@ -92,7 +92,7 @@ The custom domain comes from `routes` in `wrangler.jsonc`, so the domain has to 
 Cloudflare account. Other branches get preview URLs.
 
 Only `public/` is uploaded as static files, and `public/_headers` adds security headers to every
-response. Deploying restarts the Durable Objects, which disconnects phones for a moment; they
+response. Deploying restarts the Durable Objects, which disconnects everyone for a moment; they
 reconnect on their own. Another static host can serve `public/` too, but only for local wheels.
 
 ### Tests
@@ -108,7 +108,7 @@ This uses Node's built-in test runner, so nothing extra is needed. The tests cov
 - this device's data (`public/js/state.js`): saving, backups, the safety nets above, online
   wheels' copies, and damaged or deliberately malicious backup files;
 - the server (`server/room.js`, `server/directory.js`) with in-memory stand-ins for Durable
-  Objects: joining, signing in, who sees what, two phones spinning at once, releasing names,
+  Objects: joining, signing in, who sees what, two devices spinning at once, releasing names,
   expiry, and oversized or flooding messages.
 
 ## Notes for contributors
@@ -123,12 +123,12 @@ This uses Node's built-in test runner, so nothing extra is needed. The tests cov
   animation lands on it. Refreshing mid-spin can't re-roll.
 - **Online wheels:** the screens work from this device's copy of the wheel. The host's changes
   apply to the copy straight away and go to the server (`public/js/store/online.js`); the
-  server's reply replaces the copy. `server/room.js` decides who may do what and what each phone
+  server's reply replaces the copy. `server/room.js` decides who may do what and what each device
   sees, such as players never receiving surprises they haven't spun.
 - **Saved data has a version.** If you change its shape, bump `SCHEMA_VERSION` in
   `public/js/state.js` (or `WHEEL_VERSION` in `rules.js`) and teach the normalize functions to
   read the old shape, so existing saves, backup files and online wheels keep working.
-- **Anything from storage, a backup file or another phone is untrusted.** It all goes through
+- **Anything from storage, a backup file or another device is untrusted.** It all goes through
   `normalizeWheel()` (and `normalize()` on this device), which checks every field and caps sizes.
   The server also limits message sizes, message rates, connections per wheel, and how many
   wheels one network can create per hour. Anything a user typed is escaped (`escapeHtml()`) or
