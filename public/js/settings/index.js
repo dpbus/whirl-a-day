@@ -28,7 +28,7 @@ const TABS = { wheel: wheelTab, players: playersTab, general: generalTab, backup
 let dialog;
 let tabBar;
 let hooks = { onChange() {}, syncFromStorage() {} };
-let saveOnClose = true;
+let currentTab = 'wheel';
 
 const view = {
   body: null,
@@ -52,11 +52,8 @@ export function initSettings(callbacks) {
   tabBar.addEventListener('keydown', moveBetweenTabs);
 
   dialog.addEventListener('close', () => {
-    if (saveOnClose) {
-      store.flushSave();
-      store.pruneBlankOptions();
-    }
-    saveOnClose = true;
+    store.flushSave();
+    store.pruneBlankOptions();
     hooks.onChange();
   });
 }
@@ -76,11 +73,12 @@ export async function openSettings(tab = 'wheel') {
   dialog.showModal();
 }
 
-/** Close without saving pending edits (used when the data was just reloaded from another tab). */
-export function discardSettings() {
-  if (!dialog.open) return;
-  saveOnClose = false;
-  dialog.close();
+/**
+ * The data was just reloaded (another tab of the app saved, e.g. an online wheel's update):
+ * redraw the open tab from the fresh data, keeping the scroll position, rather than closing.
+ */
+export function refreshSettings() {
+  if (dialog.open) showTab(currentTab, { keepScroll: true });
 }
 
 function showTab(tab, { keepScroll = false } = {}) {
@@ -89,6 +87,7 @@ function showTab(tab, { keepScroll = false } = {}) {
   const wheel = store.activeWheel();
   const available = { wheel: Boolean(wheel), players: Boolean(wheel) && store.canManage(wheel), general: true, backup: true };
   if (!available[tab]) tab = available.wheel ? 'wheel' : 'general';
+  currentTab = tab;
   for (const [name, shown] of Object.entries(available)) tabBar.querySelector(`[data-tab="${name}"]`).hidden = !shown;
   const { body } = view;
   const scrollTop = body.scrollTop;

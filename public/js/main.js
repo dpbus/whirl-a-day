@@ -9,7 +9,7 @@ import { dayKey } from './rules.js';
 import { applyTheme } from './themes.js';
 import { WheelView } from './wheel.js';
 import * as fx from './effects.js';
-import { discardSettings, initSettings, openSettings, openWelcome } from './settings/index.js';
+import { initSettings, openSettings, openWelcome, refreshSettings } from './settings/index.js';
 import { onNewWheel, openNewWheel } from './settings/new-wheel.js';
 import { alertDialog, confirmDialog } from './dialogs.js';
 import { icon, hydrateIcons } from './icons.js';
@@ -118,13 +118,10 @@ function syncFromStorage() {
     syncAfterSpin = true;
     return false;
   }
-  // Open dialogs hold references to the old data, so close them (settings without saving).
-  // The welcome and result dialogs are safe to leave open.
-  discardSettings();
-  for (const dialog of document.querySelectorAll('dialog[open]')) {
-    if (dialog !== els.result && !dialog.classList.contains('welcome') && !dialog.classList.contains('join')) dialog.close();
-  }
+  // Dialogs stay open: settings redraws from the fresh data, and every other dialog looks its
+  // wheel up again by id when it acts.
   store.load();
+  refreshSettings();
   render();
   return true;
 }

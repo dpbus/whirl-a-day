@@ -299,8 +299,9 @@ function bindLinkButtons(dialog, link, title) {
 
 /** Send a host-only change (release, set-join-open, rotate-code, delete) for the wheel on screen. */
 export function hostAction(wheel, name, args) {
+  // By server id: after a reload from storage, the screens may hold an older copy of the wheel.
   const connection = online.currentConnection();
-  if (connection?.wheel !== wheel) return Promise.reject(new online.OnlineError('offline'));
+  if (!wheel.online || connection?.wheel.online?.wheelId !== wheel.online.wheelId) return Promise.reject(new online.OnlineError('offline'));
   return connection.hostAction(name, args);
 }
 
@@ -317,7 +318,8 @@ export async function takeOffline(wheel) {
     alertDialog(err.message, { title: "Couldn't take it offline" });
     return false;
   }
-  store.makeLocal(wheel);
+  const current = store.getWheel(wheel.id); // may be a fresher copy if storage reloaded meanwhile
+  if (current) store.makeLocal(current);
   hooks.onChange();
   return true;
 }
