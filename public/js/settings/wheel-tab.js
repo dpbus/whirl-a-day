@@ -1,4 +1,4 @@
-// Settings → Edit wheel: the active wheel's title, theme and rules, its options,
+// Settings → This wheel: the active wheel's title, theme and rules, its options,
 // and the progress tools (undo, extra spin, reset) for whoever is selected.
 import * as store from '../state.js';
 import { getPreset } from '../presets.js';
@@ -13,16 +13,62 @@ import { bindThemeCards, presetOptions, themeCards } from './shared.js';
 
 export function render(view) {
   const wheel = store.activeWheel();
+  if (!store.canManage(wheel)) return renderJoined(view, wheel);
   view.body.innerHTML = `
     ${rulesSection(wheel)}
     ${optionsSection()}
     ${progressSection(wheel)}
     ${onlineSection(wheel)}
+    ${removeSection(wheel)}
   `;
   bindRules(view, wheel);
   bindOptions(view, wheel);
   bindProgress(view, wheel);
   bindOnline(view, wheel);
+  bindRemove(view, wheel);
+}
+
+/** A wheel someone else hosts: who you are on it, and leaving it. */
+function renderJoined(view, wheel) {
+  const me = store.activePlayer(wheel);
+  view.body.innerHTML = `
+    <h3>“${escapeHtml(store.wheelTitle(wheel))}”</h3>
+    <p>${me ? `You joined as <strong>${escapeHtml(displayName(me))}</strong>.` : 'You joined this wheel.'} It's hosted on someone else's phone, so only they can change it.</p>
+    ${removeSection(wheel)}`;
+  bindRemove(view, wheel);
+}
+
+// ================================================================ remove / leave
+
+function removeSection(wheel) {
+  const role = store.roleOf(wheel);
+  return `
+    <h3>${role === 'player' ? 'Leave this wheel' : 'Remove this wheel'}</h3>
+    <p class="hint">${
+      role === 'owner'
+        ? 'Removes it from this device with everyone’s progress. A snapshot is kept, so it can be undone from Backup.'
+        : role === 'host'
+          ? 'Removes it from this device only: it stays online for the other phones until it expires. To delete it from whirladay.com, take it offline first (above).'
+          : 'Removes it from this phone. To come back, scan the QR code again; the host may need to release your name first.'
+    }</p>
+    <button type="button" class="btn danger" id="w-remove-wheel">${icon('trash-2', { size: 18 })} ${role === 'player' ? 'Leave wheel' : 'Remove wheel'}</button>`;
+}
+
+function bindRemove(view, wheel) {
+  $('#w-remove-wheel', view.body).addEventListener('click', async () => {
+    const role = store.roleOf(wheel);
+    const message =
+      role === 'owner'
+        ? `Remove “${store.wheelTitle(wheel)}” and everyone's progress on it? (A snapshot is kept, so this can be undone from Backup.)`
+        : role === 'host'
+          ? `Remove “${store.wheelTitle(wheel)}” from this device? It stays online for the other phones until it expires, and you can only manage it again with its host link.`
+          : `Leave “${store.wheelTitle(wheel)}”? To come back, scan the QR code again.`;
+    const ok = await confirmDialog(message, { title: role === 'player' ? 'Leave wheel?' : 'Remove wheel?', ok: role === 'player' ? 'Leave' : 'Remove', danger: true });
+    if (!ok || !store.getWheel(wheel.id)) return;
+    store.removeWheel(wheel.id);
+    view.changed();
+    view.close();
+  });
 }
 
 /** Re-render this tab without jumping back to the top. */

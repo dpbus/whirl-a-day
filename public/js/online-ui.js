@@ -210,23 +210,46 @@ export function putOnline(wheel) {
     event.preventDefault();
     submit.disabled = true;
     dialog.querySelector('.error').textContent = '';
-    const sharedWheel = form.elements.kind.value === 'shared';
-    store.takeSnapshot(`Before putting “${wheelTitle(wheel)}” online`);
     try {
-      const result = await online.createOnlineWheel(wheel, { sharedWheel, timeZone: deviceTimeZone() });
-      const current = store.getWheel(wheel.id);
-      if (!current) return dialog.close();
-      current.online = { wheelId: result.wheelId, role: 'host', token: result.hostSecret, playerId: null };
-      store.applyServerWheel(current, result.wheel, result.meta);
+      const current = await goOnline(wheel, { sharedWheel: form.elements.kind.value === 'shared' });
       dialog.close();
-      hooks.onChange();
-      showInvite(current, { justCreated: true });
+      if (current) showInvite(current, { justCreated: true });
     } catch (err) {
       dialog.querySelector('.error').textContent = err.message;
       submit.disabled = false;
     }
   });
   dialog.showModal();
+}
+
+/**
+ * Move a wheel from this device to the server, as its host. Returns the wheel (now online), or
+ * null if it was removed meanwhile. Throws an OnlineError if the server can't be reached.
+ */
+export async function goOnline(wheel, { sharedWheel }) {
+  store.takeSnapshot(`Before putting “${wheelTitle(wheel)}” online`);
+  const result = await online.createOnlineWheel(wheel, { sharedWheel, timeZone: deviceTimeZone() });
+  const current = store.getWheel(wheel.id);
+  if (!current) return null;
+  current.online = { wheelId: result.wheelId, role: 'host', token: result.hostSecret, playerId: null };
+  store.applyServerWheel(current, result.wheel, result.meta);
+  hooks.onChange();
+  return current;
+}
+
+/**
+ * Right after making a wheel: put it online if that's how it'll be played, and show the QR code.
+ * If the server can't be reached, the wheel stays on this device and can go online later.
+ */
+export async function startOnline(wheel, { sharedWheel }) {
+  try {
+    const current = await goOnline(wheel, { sharedWheel });
+    if (current) showInvite(current, { justCreated: true });
+  } catch (err) {
+    alertDialog(`${err.message} The wheel is saved on this device; put it online later from Settings → This wheel.`, {
+      title: "Couldn't put it online",
+    });
+  }
 }
 
 /** The QR code and link that people use to join. */
@@ -242,7 +265,7 @@ export function showInvite(wheel, { justCreated = false } = {}) {
       <p class="join-link">${escapeHtml(link.replace(/^https?:\/\//, ''))}</p>
       ${linkButtons()}
       ${wheel.online.joinOpen ? '' : '<p class="hint">Joining is closed right now. Open it in Settings → Players.</p>'}
-      ${justCreated ? '<p class="hint">Tip: save your host link (Settings → Edit wheel → Online) somewhere safe, so you can manage this wheel from another device.</p>' : ''}
+      <p class="hint">You can bring this QR code back any time with the QR button at the top of the screen.${justCreated ? ' Tip: save your host link (Settings → This wheel → Online) somewhere safe, so you can manage this wheel from another device.' : ''}</p>
       <div class="dialog-actions"><button class="btn primary">Done</button></div>
     </form>`,
     titleId,
@@ -320,7 +343,7 @@ export function statusText(wheel, status) {
         : "This phone isn't signed in to this wheel anymore. Scan the QR code again to rejoin.";
     case 'gone':
       return role === 'host'
-        ? 'This wheel was deleted from whirladay.com. You can keep a copy on this device from Settings → Edit wheel.'
+        ? 'This wheel was deleted from whirladay.com. You can keep a copy on this device from Settings → This wheel.'
         : 'This wheel was deleted from whirladay.com.';
     default:
       return '';

@@ -3,7 +3,8 @@ import * as store from '../state.js';
 import { getTheme } from '../themes.js';
 import { DEFAULT_PRESET_ID } from '../presets.js';
 import { $ } from '../util.js';
-import { PLAYERS_HINT, bindPlayerNames, bindThemeCards, isIOS, isInstalled, playerNamesField, presetOptions, themeCards } from './shared.js';
+import { startOnline } from '../online-ui.js';
+import { PLAYERS_HINT, bindPlayMode, bindPlayerNames, bindThemeCards, isIOS, isInstalled, playModeField, playerNamesField, presetOptions, themeCards } from './shared.js';
 
 let onDone = () => {};
 
@@ -30,11 +31,12 @@ export function openWelcome() {
         <label for="wl-preset">What's it for?</label>
         <select id="wl-preset">${presetOptions(DEFAULT_PRESET_ID)}</select>
       </div>
+      ${playModeField()}
       ${playerNamesField('wl', { hint: PLAYERS_HINT })}
       ${isIOS() && !isInstalled() ? `
       <p class="tip">📱 <strong>On iPhone or iPad?</strong> Tap Share → <strong>Add to Home Screen</strong> first, and set things up from there. The Home Screen app keeps its own data, and it's safer from being cleared.</p>` : ''}
       <div class="dialog-actions">
-        <button class="btn primary big">Let's go!</button>
+        <button class="btn primary big" value="go">Let's go!</button>
       </div>
     </form>`;
   document.body.append(welcome);
@@ -49,12 +51,16 @@ export function openWelcome() {
   });
 
   const players = bindPlayerNames(welcome, 'wl');
+  const playMode = bindPlayMode(welcome.querySelector('form'));
 
   welcome.addEventListener('close', () => {
-    store.addWheel({ presetId: $('#wl-preset', welcome).value, theme: pickedTheme, playerNames: players.names() });
+    const wheel = store.addWheel({ presetId: $('#wl-preset', welcome).value, theme: pickedTheme, playerNames: players.names() });
     store.requestPersistentStorage();
+    // Escape closes the dialog too; that still makes a wheel, but only "Let's go!" puts it online.
+    const mode = welcome.returnValue === 'go' ? playMode() : 'local';
     welcome.remove();
     onDone();
+    if (mode !== 'local') startOnline(wheel, { sharedWheel: mode === 'shared' });
   });
 
   welcome.showModal();

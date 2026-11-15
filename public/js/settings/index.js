@@ -13,7 +13,6 @@
 import * as store from '../state.js';
 import { pinPrompt } from '../dialogs.js';
 import { $, debounce } from '../util.js';
-import * as wheelsTab from './wheels-tab.js';
 import * as wheelTab from './wheel-tab.js';
 import * as playersTab from './players-tab.js';
 import * as generalTab from './general-tab.js';
@@ -22,8 +21,9 @@ import { onWelcomeDone } from './welcome.js';
 
 export { openWelcome } from './welcome.js';
 
-const TABS = { wheels: wheelsTab, wheel: wheelTab, players: playersTab, general: generalTab, backup: backupTab };
-const TABS_NEEDING_A_WHEEL = new Set(['wheel', 'players']);
+// Settings are for the wheel on screen (plus app-wide General and Backup). The list of wheels and
+// "New wheel" live in the wheels menu (main.js), so it's clear which wheel these settings change.
+const TABS = { wheel: wheelTab, players: playersTab, general: generalTab, backup: backupTab };
 
 let dialog;
 let tabBar;
@@ -84,10 +84,12 @@ export function discardSettings() {
 }
 
 function showTab(tab, { keepScroll = false } = {}) {
-  // A phone that joined someone else's online wheel can't edit it, so those tabs are hidden.
-  const canManage = Boolean(store.activeWheel()) && store.canManage(store.activeWheel());
-  if (TABS_NEEDING_A_WHEEL.has(tab) && !canManage) tab = 'wheels';
-  for (const name of TABS_NEEDING_A_WHEEL) tabBar.querySelector(`[data-tab="${name}"]`).hidden = !canManage;
+  // Without a wheel there's nothing to set up but the app; a phone that joined someone else's
+  // online wheel sees the wheel (to leave it) but not its players.
+  const wheel = store.activeWheel();
+  const available = { wheel: Boolean(wheel), players: Boolean(wheel) && store.canManage(wheel), general: true, backup: true };
+  if (!available[tab]) tab = available.wheel ? 'wheel' : 'general';
+  for (const [name, shown] of Object.entries(available)) tabBar.querySelector(`[data-tab="${name}"]`).hidden = !shown;
   const { body } = view;
   const scrollTop = body.scrollTop;
 

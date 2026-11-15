@@ -87,11 +87,7 @@ test('removing a wheel or player can be undone from a snapshot', () => {
   assert.equal(store.activeWheel().spins.length, 1);
 });
 
-test('moving wheels and players reorders them', () => {
-  store.addWheel({ presetId: 'dinner', title: 'A' });
-  const b = store.addWheel({ presetId: 'dinner', title: 'B' });
-  store.moveWheel(b.id, -1);
-  assert.deepEqual(store.getState().wheels.map((w) => w.title), ['B', 'A']);
+test('moving players reorders them', () => {
   const { wheel, ben } = advent();
   store.movePlayer(wheel, ben, -1);
   assert.deepEqual(wheel.players.map((p) => p.name), ['Ben', 'Ava']);

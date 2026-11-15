@@ -10,10 +10,11 @@ import { applyTheme } from './themes.js';
 import { WheelView } from './wheel.js';
 import * as fx from './effects.js';
 import { discardSettings, initSettings, openSettings, openWelcome } from './settings/index.js';
+import { onNewWheel, openNewWheel } from './settings/new-wheel.js';
 import { alertDialog } from './dialogs.js';
 import { icon, hydrateIcons } from './icons.js';
 import { wheelButton } from './templates.js';
-import { handleLinkInUrl, initOnlineUi, statusText } from './online-ui.js';
+import { handleLinkInUrl, initOnlineUi, showInvite, statusText } from './online-ui.js';
 import { $, displayName, escapeHtml, formatDay, prefersReducedMotion } from './util.js';
 
 const APP_NAME = 'Whirl-a-Day';
@@ -31,6 +32,7 @@ const els = {
   progressTitle: $('#progress-title'),
   history: $('#history'),
   settingsBtn: $('#settings-btn'),
+  inviteBtn: $('#invite-btn'),
   ambient: $('#ambient'),
   confetti: $('#confetti'),
   result: $('#result-dialog'),
@@ -60,6 +62,7 @@ function init() {
   wheelView = new WheelView(els.canvas, { onTick });
   initSettings({ onChange: render, syncFromStorage });
   initOnlineUi({ onChange: render });
+  onNewWheel(render);
   bindEvents();
   render();
   const openedFromLink = handleLinkInUrl();
@@ -153,6 +156,10 @@ function bindEvents() {
   els.switcher.addEventListener('click', () => {
     if (!spinning) openWheelsMenu();
   });
+  els.inviteBtn.addEventListener('click', () => {
+    const wheel = store.activeWheel();
+    if (!spinning && wheel?.online?.joinCode) showInvite(wheel);
+  });
 
   els.players.addEventListener('click', (event) => {
     const button = event.target.closest('button');
@@ -195,7 +202,7 @@ function bindEvents() {
   });
   $('#wheels-new').addEventListener('click', () => {
     els.wheelsMenu.close();
-    openSettings('wheels');
+    openNewWheel();
   });
   $('#wheels-close').addEventListener('click', () => els.wheelsMenu.close());
 }
@@ -211,6 +218,8 @@ function render() {
   const wheel = store.activeWheel();
   syncConnection(wheel);
   renderOnlineStatus(wheel);
+  // The host of an online wheel can always get the QR code back from the top bar.
+  els.inviteBtn.hidden = !(store.roleOf(wheel) === 'host' && wheel.online.joinCode && wheel.online.token);
   renderPlayers(wheel);
   currentDay = dayKey(new Date(), wheel?.timeZone);
 
@@ -219,7 +228,7 @@ function render() {
     document.title = APP_NAME;
     wheelView.setLabels([]);
     els.spinBtn.disabled = true;
-    els.status.textContent = store.getLoadProblem() === 'newer-version' ? '' : 'Open Settings to make a wheel.';
+    els.status.textContent = store.getLoadProblem() === 'newer-version' ? '' : 'Tap the title to make a wheel.';
     els.progress.hidden = true;
     return;
   }

@@ -464,14 +464,6 @@ export function removeWheel(id) {
   save();
 }
 
-export function moveWheel(id, delta) {
-  const i = state.wheels.findIndex((w) => w.id === id);
-  const j = i + delta;
-  if (i < 0 || j < 0 || j >= state.wheels.length) return;
-  [state.wheels[i], state.wheels[j]] = [state.wheels[j], state.wheels[i]];
-  save();
-}
-
 // ================================================================ Changing a wheel
 
 /**

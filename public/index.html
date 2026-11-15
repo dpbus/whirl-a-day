@@ -29,7 +29,10 @@
           <span id="wheel-title">Whirl-a-Day</span><span class="visually-hidden"> (switch wheel)</span><span data-icon="chevron-down" data-size="22"></span>
         </button>
       </h1>
-      <button id="settings-btn" class="icon-btn" aria-label="Settings" title="Settings"><span data-icon="settings" data-size="22"></span></button>
+      <div class="topbar-buttons">
+        <button id="invite-btn" class="icon-btn" aria-label="Invite people (QR code)" title="Invite people" hidden><span data-icon="qr-code" data-size="22"></span></button>
+        <button id="settings-btn" class="icon-btn" aria-label="Settings" title="Settings"><span data-icon="settings" data-size="22"></span></button>
+      </div>
     </header>
 
     <p id="storage-warning" class="banner" role="alert" hidden></p>
@@ -73,8 +76,7 @@
       <form method="dialog"><button class="icon-btn" aria-label="Close settings"><span data-icon="x"></span></button></form>
     </header>
     <div class="settings-tabs" role="tablist" aria-label="Settings sections">
-      <button type="button" role="tab" id="settings-tab-wheels" aria-controls="settings-body" data-tab="wheels">Wheels</button>
-      <button type="button" role="tab" id="settings-tab-wheel" aria-controls="settings-body" data-tab="wheel">Edit wheel</button>
+      <button type="button" role="tab" id="settings-tab-wheel" aria-controls="settings-body" data-tab="wheel">This wheel</button>
       <button type="button" role="tab" id="settings-tab-players" aria-controls="settings-body" data-tab="players">Players</button>
       <button type="button" role="tab" id="settings-tab-general" aria-controls="settings-body" data-tab="general">General</button>
       <button type="button" role="tab" id="settings-tab-backup" aria-controls="settings-body" data-tab="backup">Backup</button>
@@ -84,7 +86,7 @@
 
   <dialog id="wheels-dialog" class="dialog small wheels-menu" aria-labelledby="wheels-dialog-title">
     <div class="dialog-body">
-      <h2 id="wheels-dialog-title">Wheels</h2>
+      <h2 id="wheels-dialog-title">Your wheels</h2>
       <ul id="wheels-menu-list" class="wheels-menu-list"></ul>
       <div class="dialog-actions">
         <button type="button" class="btn" id="wheels-new"><span data-icon="plus" data-size="18"></span> New wheel</button>
