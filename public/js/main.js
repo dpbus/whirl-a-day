@@ -11,7 +11,7 @@ import { WheelView } from './wheel.js';
 import * as fx from './effects.js';
 import { discardSettings, initSettings, openSettings, openWelcome } from './settings/index.js';
 import { onNewWheel, openNewWheel } from './settings/new-wheel.js';
-import { alertDialog } from './dialogs.js';
+import { alertDialog, confirmDialog } from './dialogs.js';
 import { icon, hydrateIcons } from './icons.js';
 import { wheelButton } from './templates.js';
 import { handleLinkInUrl, initOnlineUi, showInvite, statusText } from './online-ui.js';
@@ -284,7 +284,7 @@ function renderPlayers(wheel) {
       .map(
         (player) => `
         <button type="button" class="tab" aria-pressed="${player.id === selected?.id}" data-id="${escapeHtml(player.id)}">
-          ${escapeHtml(displayName(player))}${badge(player)}
+          ${escapeHtml(displayName(player))}${store.isHostPlayer(wheel, player.id) ? ' <span class="tab-you">(you)</span>' : ''}${badge(player)}
         </button>`,
       )
       .join('') + `<button type="button" class="tab tab-add" data-add aria-label="Add player" title="Add player">${icon('plus')}</button>`;
@@ -403,6 +403,7 @@ async function spin() {
 
   if (wheel.online) {
     // The server picks the result and tells every phone; onSpun() plays it.
+    if (!(await confirmSpinForSomeoneElse(wheel, playerId))) return;
     const connection = online.currentConnection();
     if (connection?.wheel !== wheel || connection.status !== 'online') return;
     waitingForServer = true;
@@ -424,6 +425,19 @@ async function spin() {
   const { spin: entry, option, index } = store.spinLocal(wheel, playerId);
   renderWarnings();
   await playSpin({ wheel, spin: entry, option, index, labels });
+}
+
+/**
+ * On an online wheel, players spin on their own phones. The host's phone can still spin for
+ * someone (a kid without a phone, say), but asks first, so it doesn't happen by accident.
+ * Spinning as the host's own name doesn't ask.
+ */
+async function confirmSpinForSomeoneElse(wheel, playerId) {
+  if (store.roleOf(wheel) !== 'host' || !playerId || store.isHostPlayer(wheel, playerId)) return true;
+  const player = store.findPlayer(wheel, playerId);
+  const name = displayName(player);
+  const why = player?.claimed ? `${name} usually spins on their own phone.` : `${name} hasn't joined from a phone yet.`;
+  return confirmDialog(`${why} Spin for ${name} from this phone?`, { title: `Spin for ${name}?`, ok: 'Spin for them' });
 }
 
 /** A spin decided by the server (this phone's, or someone else's). */

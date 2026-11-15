@@ -216,6 +216,14 @@ test('an online wheel keeps its kind, players and pointer; token hashes are neve
   assert.equal(store.activeWheel().sharedWheel, true);
 });
 
+test("the host's own name comes from the server and only counts on the host's device", () => {
+  const wheel = onlineWheel();
+  store.applyServerWheel(wheel, wheel, { hostPlayerId: 'p1' });
+  assert.equal(store.isHostPlayer(wheel, 'p1'), true);
+  store.applyServerWheel(wheel, wheel, { hostPlayerId: 'ghost' });
+  assert.equal(wheel.online.hostPlayerId, null);
+});
+
 test('a phone that joined spins as itself and cannot manage the wheel', () => {
   const wheel = onlineWheel('player');
   assert.equal(store.activePlayerId(wheel), 'p1');

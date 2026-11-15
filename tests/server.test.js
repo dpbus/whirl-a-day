@@ -241,6 +241,29 @@ test('the host can spin for a player, change the wheel, and everyone gets the ne
   assert.equal(ack.error, 'bad-request');
 });
 
+test('the host can play as their own name: nobody can join as it, and it can be given up', async () => {
+  const { room, connect, send, hostSecret } = await setup({ spinsPerDay: 0 });
+  const host = await connect(hostSecret);
+  assert.equal((await send(host, { type: 'act', name: 'set-host-player', args: { playerId: 'ben' } })).ok, true);
+  assert.equal(host.last('state').meta.hostPlayerId, 'ben');
+  assert.equal((await room.info()).players.find((p) => p.id === 'ben').claimed, true);
+  assert.deepEqual(await room.join({ joinCode: 'ABCD2345', playerId: 'ben' }), { ok: false, error: 'name-taken' });
+  assert.deepEqual(await room.join({ joinCode: 'ABCD2345', name: 'BEN' }), { ok: false, error: 'name-taken' });
+  assert.equal((await send(host, { type: 'spin', playerId: 'ben' })).ok, true);
+  // A name a phone already claimed can't become the host's.
+  await room.join({ joinCode: 'ABCD2345', playerId: 'ava' });
+  assert.equal((await send(host, { type: 'act', name: 'set-host-player', args: { playerId: 'ava' } })).error, 'name-taken');
+  // Giving it up makes it joinable again.
+  await send(host, { type: 'act', name: 'set-host-player', args: { playerId: null } });
+  assert.equal((await room.join({ joinCode: 'ABCD2345', playerId: 'ben' })).ok, true);
+});
+
+test('players cannot make themselves the host’s name', async () => {
+  const { room, connect, send } = await setup();
+  const ava = await connect((await room.join({ joinCode: 'ABCD2345', playerId: 'ava' })).token);
+  assert.equal((await send(ava, { type: 'act', name: 'set-host-player', args: { playerId: 'ben' } })).error, 'bad-request');
+});
+
 test('releasing a name signs that phone out; the name can be claimed again', async () => {
   const { room, connect, send, hostSecret } = await setup();
   const host = await connect(hostSecret);

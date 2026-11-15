@@ -26,8 +26,8 @@ const refresh = (view) => view.showTab('players', { keepScroll: true });
 function playersHint(wheel) {
   if (!wheel.online) return "Each player has their own progress on this wheel. With no players, it's a shared wheel that everyone spins together.";
   return wheel.sharedWheel
-    ? 'Everyone spins the same wheel, and the history shows who spun what. Names you add here are ready for people to tap when they join.'
-    : 'Each player works through their own copy of the wheel. Names you add here are ready for people to tap when they join.';
+    ? 'Everyone spins the same wheel, and the history shows who spun what. Names you add here are ready for people to tap when they join. Playing too? Add your own name as “This is me”.'
+    : 'Each player works through their own copy of the wheel. Names you add here are ready for people to tap when they join. Playing too? Add your own name as “This is me”.';
 }
 
 // ---------------------------------------------------------------- joining (online wheels)
@@ -69,12 +69,26 @@ function bindJoining(view, wheel) {
 
 // ---------------------------------------------------------------- player list
 
-/** "Joined" / "Not joined yet" for online wheels. */
+/** "You" / "Joined" / "Not joined yet" for online wheels, with what the host can do about it. */
 function claimStatus(wheel, player) {
   if (!wheel.online) return '';
-  return player.claimed
-    ? `<span class="claim joined">Joined</span><button type="button" class="btn small" data-release>Release</button>`
-    : '<span class="claim">Not joined yet</span>';
+  if (store.isHostPlayer(wheel, player.id)) {
+    return '<span class="claim joined">You</span><button type="button" class="btn small" data-not-me>Not me</button>';
+  }
+  if (player.claimed) return '<span class="claim joined">Joined</span><button type="button" class="btn small" data-release>Release</button>';
+  return `<span class="claim">Not joined yet</span>${wheel.online.hostPlayerId ? '' : '<button type="button" class="btn small" data-me>This is me</button>'}`;
+}
+
+/** Make a name the host's own (or none): it's theirs to spin, and nobody else can join as it. */
+async function setHostPlayer(view, wheel, playerId) {
+  try {
+    await hostAction(wheel, 'set-host-player', { playerId });
+    if (playerId) store.setActivePlayer(wheel, playerId);
+  } catch (err) {
+    alertDialog(err.message, { title: "That didn't work" });
+  }
+  view.changed();
+  refresh(view);
 }
 
 function renderPlayerList(view, wheel) {
@@ -96,6 +110,12 @@ function renderPlayerList(view, wheel) {
     if (!id) return;
     store.renamePlayer(wheel, id, event.target.value);
     view.changedSoon();
+  });
+
+  list.addEventListener('click', (event) => {
+    const id = event.target.closest('[data-id]')?.dataset.id;
+    if (event.target.closest('[data-me]')) setHostPlayer(view, wheel, id);
+    else if (event.target.closest('[data-not-me]')) setHostPlayer(view, wheel, null);
   });
 
   list.addEventListener('click', async (event) => {
@@ -153,6 +173,11 @@ function addPlayerForm(wheel) {
         <label for="p-name">Name</label>
         <input id="p-name" maxlength="${store.MAX_NAME_LENGTH}" required placeholder="e.g. Lily">
       </div>
+      ${
+        wheel.online && !wheel.online.hostPlayerId
+          ? `<div class="toggles"><label class="switch"><input type="checkbox" id="p-me"><span>This is me: I'm playing too, from this phone</span></label></div>`
+          : ''
+      }
       <button class="btn primary">${wheel.online ? 'Add name' : 'Add player'}</button>
     </form>`;
 }
@@ -172,7 +197,8 @@ function bindAddPlayer(view, wheel) {
       );
       if (!ok || !store.getWheel(wheel.id)) return;
     }
-    store.addPlayer(store.getWheel(wheel.id), name);
+    const player = store.addPlayer(store.getWheel(wheel.id), name);
+    if ($('#p-me', view.body)?.checked) return setHostPlayer(view, wheel, player.id);
     view.changed();
     refresh(view);
   });

@@ -376,6 +376,8 @@ function normalizeOnline(raw, wheel) {
     playerId: raw.role === 'player' && wheel.players.some((p) => p.id === raw.playerId) ? raw.playerId : null,
     joinCode: isJoinCode(raw.joinCode) ? raw.joinCode : '',
     joinOpen: raw.joinOpen !== false,
+    // The host's own name, when they play too (host devices only).
+    hostPlayerId: raw.role === 'host' && wheel.players.some((p) => p.id === raw.hostPlayerId) ? raw.hostPlayerId : null,
     lastActiveAt: typeof raw.lastActiveAt === 'string' && !Number.isNaN(Date.parse(raw.lastActiveAt)) ? raw.lastActiveAt.slice(0, 40) : '',
   };
 }
@@ -411,6 +413,9 @@ export const canManage = (wheel) => roleOf(wheel) !== 'player';
 
 /** Has this device lost its sign-in to an online wheel (restored from a backup, released)? */
 export const isSignedOut = (wheel) => Boolean(wheel?.online && !wheel.online.token);
+
+/** Is this the host's own name on a wheel they host (they play too)? */
+export const isHostPlayer = (wheel, playerId) => Boolean(playerId) && wheel?.online?.role === 'host' && wheel.online.hostPlayerId === playerId;
 
 /**
  * Who spins on this device right now: the player this phone joined as, the selected tab, or
@@ -631,7 +636,7 @@ export function addOnlineWheel(serverWheel, online) {
  */
 export function applyServerWheel(wheel, serverWheel, meta = {}) {
   const fresh = normalizeDeviceWheel(
-    { ...serverWheel, id: wheel.id, activePlayerId: wheel.activePlayerId, online: { ...wheel.online, ...pick(meta, ['joinCode', 'joinOpen', 'lastActiveAt']) } },
+    { ...serverWheel, id: wheel.id, activePlayerId: wheel.activePlayerId, online: { ...wheel.online, ...pick(meta, ['joinCode', 'joinOpen', 'hostPlayerId', 'lastActiveAt']) } },
     new Set(),
     state.settings.theme,
   );

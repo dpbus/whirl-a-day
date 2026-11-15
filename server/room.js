@@ -138,7 +138,7 @@ export class WheelRoom {
       theme: wheel.theme,
       sharedWheel: wheel.sharedWheel,
       joinOpen: meta.joinOpen,
-      players: wheel.players.map((p) => ({ id: p.id, name: p.name, claimed: Boolean(p.tokenHash) })),
+      players: wheel.players.map((p) => ({ id: p.id, name: p.name, claimed: Boolean(p.tokenHash) || p.id === meta.hostPlayerId })),
     };
   }
 
@@ -167,7 +167,7 @@ export class WheelRoom {
         player = rules.applyAction(wheel, 'add-player', { name: wanted });
       }
     }
-    if (player.tokenHash) return fail('name-taken');
+    if (player.tokenHash || player.id === meta.hostPlayerId) return fail('name-taken');
 
     player.tokenHash = tokenHash;
     meta.lastActiveAt = this.now().toISOString();
@@ -302,7 +302,19 @@ export class WheelRoom {
           const player = rules.findPlayer(wheel, args.playerId);
           if (!player) throw new rules.RuleError('no-player');
           delete player.tokenHash;
+          if (meta.hostPlayerId === player.id) meta.hostPlayerId = null;
           this.signOutPlayer(player.id);
+          break;
+        }
+        case 'set-host-player': {
+          // The host plays too, as this name (or none). A name a phone has claimed can't be theirs.
+          const playerId = typeof args.playerId === 'string' ? args.playerId : null;
+          if (playerId) {
+            const player = rules.findPlayer(wheel, playerId);
+            if (!player) throw new rules.RuleError('no-player');
+            if (player.tokenHash) throw new rules.RuleError('name-taken');
+          }
+          meta.hostPlayerId = playerId;
           break;
         }
         case 'set-join-open':
@@ -318,6 +330,7 @@ export class WheelRoom {
           break;
         case 'remove-player':
           rules.applyAction(wheel, name, args, { now: this.now() });
+          if (meta.hostPlayerId === args.id) meta.hostPlayerId = null;
           this.signOutPlayer(args.id);
           break;
         default:
@@ -372,7 +385,13 @@ export class WheelRoom {
     const { wheel, meta } = this.data;
     return {
       wheel: { ...wheel, players: wheel.players.map(({ tokenHash, ...p }) => ({ ...p, claimed: Boolean(tokenHash) })) },
-      meta: { joinCode: meta.joinCode, joinOpen: meta.joinOpen, lastActiveAt: meta.lastActiveAt, expiresAt: new Date(this.expiresAt()).toISOString() },
+      meta: {
+        joinCode: meta.joinCode,
+        joinOpen: meta.joinOpen,
+        hostPlayerId: meta.hostPlayerId ?? null,
+        lastActiveAt: meta.lastActiveAt,
+        expiresAt: new Date(this.expiresAt()).toISOString(),
+      },
     };
   }
 
