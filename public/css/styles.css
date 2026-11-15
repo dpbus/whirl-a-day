@@ -136,6 +136,7 @@ button:disabled { cursor: not-allowed; }
 }
 .tab-add { padding: 10px 16px; font-size: 1.2rem; }
 .tab-badge { font-size: 0.8rem; }
+.page-actions { display: flex; justify-content: center; margin: 20px 0 8px; }
 .tab-you { font-weight: 400; opacity: 0.8; }
 .tab-badge.ready {
   width: 9px;

@@ -33,6 +33,7 @@ const els = {
   history: $('#history'),
   settingsBtn: $('#settings-btn'),
   inviteBtn: $('#invite-btn'),
+  newWheelBtn: $('#new-wheel-btn'),
   ambient: $('#ambient'),
   confetti: $('#confetti'),
   result: $('#result-dialog'),
@@ -156,6 +157,9 @@ function bindEvents() {
   els.switcher.addEventListener('click', () => {
     if (!spinning) openWheelsMenu();
   });
+  els.newWheelBtn.addEventListener('click', () => {
+    if (!spinning) openNewWheel();
+  });
   els.inviteBtn.addEventListener('click', () => {
     const wheel = store.activeWheel();
     if (!spinning && wheel?.online?.joinCode) showInvite(wheel);
@@ -223,12 +227,14 @@ function render() {
   renderPlayers(wheel);
   currentDay = dayKey(new Date(), wheel?.timeZone);
 
+  // With no wheel yet, "New wheel" is the main thing to do.
+  els.newWheelBtn.classList.toggle('primary', !wheel);
   if (!wheel) {
     els.title.textContent = APP_NAME;
     document.title = APP_NAME;
     wheelView.setLabels([]);
     els.spinBtn.disabled = true;
-    els.status.textContent = store.getLoadProblem() === 'newer-version' ? '' : 'Tap the title to make a wheel.';
+    els.status.textContent = store.getLoadProblem() === 'newer-version' ? '' : 'Make a wheel to get started.';
     els.progress.hidden = true;
     return;
   }
