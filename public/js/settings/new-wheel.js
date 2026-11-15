@@ -101,7 +101,13 @@ export async function openNewWheel() {
 
   dialog.addEventListener('close', () => {
     if (dialog.returnValue !== 'create') return;
-    const wheel = store.addWheel({ presetId: presetSelect.value, title: $('#nw-title', form).value, theme, playerNames: players.names() });
+    let wheel;
+    try {
+      wheel = store.addWheel({ presetId: presetSelect.value, title: $('#nw-title', form).value, theme, playerNames: players.names() });
+    } catch (err) {
+      alertDialog(err.message, { title: "Couldn't make the wheel" }); // e.g. another tab made the last one allowed
+      return;
+    }
     const mode = playMode();
     onDone();
     if (mode !== 'local') startOnline(wheel, { sharedWheel: mode === 'shared' });

@@ -78,7 +78,11 @@ export async function openSettings(tab = 'wheel') {
  * redraw the open tab from the fresh data, keeping the scroll position, rather than closing.
  */
 export function refreshSettings() {
-  if (dialog.open) showTab(currentTab, { keepScroll: true });
+  if (!dialog.open) return;
+  // Don't redraw under someone who's typing: wait until they leave the field.
+  const typing = view.body.contains(document.activeElement) && document.activeElement.matches('input, textarea');
+  if (!typing) return showTab(currentTab, { keepScroll: true });
+  view.body.addEventListener('focusout', () => setTimeout(() => dialog.open && showTab(currentTab, { keepScroll: true })), { once: true });
 }
 
 function showTab(tab, { keepScroll = false } = {}) {

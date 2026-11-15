@@ -97,7 +97,6 @@ async function runPlayerAction(wheel, player, action) {
       const current = store.getWheel(wheel.id);
       if (!newName || !current) return false;
       store.renamePlayer(current, player.id, newName);
-      store.flushSave();
       return true;
     }
     case 'me':

@@ -18,7 +18,7 @@ const groupLimit = (wheel) => wheel.sharedWheel && wheel.sharedDailyLimit === tr
 /** Does `playerId` (null: the whole wheel) have their own daily limit to top up? */
 function hasOwnLimit(wheel, playerId) {
   if (!wheel.spinsPerDay) return false;
-  if (playerId === null) return !wheel.players.length || groupLimit(wheel);
+  if (playerId === null) return wheel.sharedWheel && (!wheel.players.length || groupLimit(wheel));
   return !groupLimit(wheel);
 }
 

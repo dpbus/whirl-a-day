@@ -161,6 +161,22 @@ export const saveHealthy = () => saveOk;
 export const getLoadProblem = () => loadProblem;
 export const getRecoveredFrom = () => recoveredFrom;
 
+/**
+ * Reload what another tab of the app saved. Wheels this tab already has are updated in place,
+ * so open screens (settings, menus, the online connection) keep a valid reference, and this tab
+ * stays on the wheel it was showing.
+ */
+export function reloadFromStorage() {
+  const before = new Map(state.wheels.map((w) => [w.id, w]));
+  const showing = state.activeWheelId;
+  load();
+  state.wheels = state.wheels.map((fresh) => {
+    const mine = before.get(fresh.id);
+    return mine ? Object.assign(clearWheel(mine), fresh) : fresh;
+  });
+  if (getWheel(showing)) state.activeWheelId = showing;
+}
+
 /** True if storage holds something other than what this page last read or wrote. */
 export function storageChangedElsewhere() {
   try {
@@ -430,14 +446,10 @@ export function activePlayer(wheel) {
 
 export const activePlayerId = (wheel) => activePlayer(wheel)?.id ?? null;
 
-/**
- * Show this wheel. `save: false` keeps the choice to this tab of the app (used after reloading
- * what another tab saved, so each tab stays on its own wheel).
- */
-export function setActiveWheel(id, { save: persist = true } = {}) {
+export function setActiveWheel(id) {
   if (getWheel(id)) {
     state.activeWheelId = id;
-    if (persist) save();
+    save();
   }
 }
 
@@ -550,8 +562,9 @@ export function addPlayer(wheel, name) {
   return player;
 }
 
-export function renamePlayer(wheel, id, name) {
-  act(wheel, 'rename-player', { id, name }, { soon: true }); // called while typing
+/** Rename a player. `soon` waits for a pause, for renaming while typing. */
+export function renamePlayer(wheel, id, name, { soon = false } = {}) {
+  act(wheel, 'rename-player', { id, name }, { soon });
 }
 
 export function removePlayer(wheel, id) {
@@ -629,10 +642,12 @@ export function applyServerWheel(wheel, serverWheel, meta = {}) {
     new Set(),
     state.settings.theme,
   );
+  const before = JSON.stringify(wheel);
   Object.assign(clearWheel(wheel), fresh);
-  // If another tab saved meanwhile, don't write over it: this page reloads from storage soon
-  // (main.js), and the server sends its copy again when it reconnects.
-  if (!storageChangedElsewhere()) save();
+  // Save only real changes: two tabs that each save the server's same copy would otherwise keep
+  // reloading each other. And if another tab saved meanwhile, don't write over it: this page
+  // reloads from storage soon (main.js) and asks the server for its copy again.
+  if (JSON.stringify(wheel) !== before && !storageChangedElsewhere()) save();
 }
 
 /** Forget this device's sign-in to an online wheel (keeps the last-known copy). */

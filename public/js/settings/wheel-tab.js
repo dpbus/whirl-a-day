@@ -19,7 +19,7 @@ export function render(view) {
   view.body.innerHTML = `
     ${basicsSection(wheel)}
     ${optionsSection()}
-    ${wheel.players.length ? '' : `<div id="w-progress"><h3>Progress</h3>${wheelRow(wheel) || '<p class="hint">No spins yet.</p>'}</div>`}
+    ${wheel.players.length || !wheel.sharedWheel ? '' : `<div id="w-progress"><h3>Progress</h3>${wheelRow(wheel) || '<p class="hint">No spins yet.</p>'}</div>`}
     ${onlineSection(wheel)}
     ${moreOptions(wheel)}
   `;

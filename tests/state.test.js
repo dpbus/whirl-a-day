@@ -232,6 +232,15 @@ test("the server's copy replaces an online wheel in place", () => {
   assert.equal(wheel.online.token, TOKEN);
 });
 
+test("the server's copy is only saved when it changes something", () => {
+  const wheel = onlineWheel();
+  const writes = () => storage.data.get(KEY);
+  const saved = writes();
+  storage.data.set(KEY, saved.replace('"activeWheelId"', '"activeWheelId" ')); // another tab's equivalent save
+  store.applyServerWheel(wheel, { ...wheel }, {});
+  assert.notEqual(writes(), saved); // untouched: nothing changed, so nothing was written
+});
+
 test('changes to an online wheel apply to the copy and are sent on', async () => {
   const sent = [];
   store.setOnlineSender((wheel, name, args) => {
@@ -374,12 +383,17 @@ test('reset and erase can be undone from snapshots (by timestamp); summaries des
   assert.throws(() => store.restoreSnapshot('no-such-time'), /no longer exists/);
 });
 
-test('choosing a wheel without saving keeps the choice to this tab', () => {
+test("reloading another tab's save updates wheels in place and keeps this tab's wheel", () => {
   const { wheel } = advent();
   const dinner = store.addWheel({ presetId: 'dinner' });
-  store.setActiveWheel(wheel.id, { save: false });
-  assert.equal(store.activeWheel(), wheel);
-  assert.equal(raw().activeWheelId, dinner.id);
+  store.setActiveWheel(wheel.id);
+  const other = raw();
+  other.activeWheelId = dinner.id; // the other tab switched wheels…
+  other.wheels[0].title = 'Renamed elsewhere'; // …and changed this one
+  storage.data.set(KEY, JSON.stringify(other));
+  store.reloadFromStorage();
+  assert.equal(store.activeWheel(), wheel); // same object, still shown here
+  assert.equal(wheel.title, 'Renamed elsewhere');
 });
 
 test('changes from another tab are detected', () => {
