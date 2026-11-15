@@ -1,141 +1,102 @@
 # Whirl-a-Day
 
-A spinner wheel that remembers what each player has spun. Built for a 12-days-of-Christmas /
-advent calendar: each kid spins once a day, and the number they get comes off **their** wheel.
-It also handles everyday wheels, like a chore wheel or a family dinner picker.
+Spin-the-wheel picker that remembers what's been drawn, for advent calendars, chore charts and
+dinner decisions.
 
-Plain HTML, CSS and JavaScript. **No build step, no dependencies.** It makes no requests to any
-other server: fonts, sounds, icons and the confetti library are all served with the app.
+A friend wanted something for her kids' 12 Days of Christmas: each morning they spin a wheel,
+open whichever day it lands on, and that number is gone for the rest of the season. Every
+spinner I found online forgot everything between visits, so I built one that doesn't. It turned
+out to be handy for other things too, like a chore wheel or settling "what's for dinner?".
 
-## Run it locally
+## How it works
 
-ES modules need to be served over http (opening `index.html` directly won't work):
+- **Make a wheel** from a preset (12 Days of Christmas, Advent, chores, dinner, yes/no) or write
+  your own options. Each option can hide a surprise, like "Hot cocoa movie night", that's
+  revealed when it comes up.
+- **Add players**, and each kid gets their own tab and their own wheel to work through. Or skip
+  players for a wheel the whole family shares.
+- **Set the rules:** results can come off the wheel once they're spun, and you can limit spins
+  per day (one a day for an advent calendar, unlimited for dinner).
+- **Keep as many wheels as you like** and switch between them from the title at the top. Each
+  one has its own theme: Christmas, Winter Wonderland, Halloween, Birthday, Classic or Midnight.
+- **Grown-up settings** can sit behind an optional PIN so nobody gives themselves an extra spin.
+  If you forget the PIN, type "remove pin" at the prompt; your progress stays put.
+
+There's confetti, a little falling snow for the winter themes, and real recorded sounds: a
+wooden click, a music box or sleigh bells as the wheel ticks past each slice.
+
+### Your data
+
+Everything stays in the browser on the device you're using. Nothing is sent anywhere, and
+there's no account. That also means progress lives on that one device, so the app keeps a few
+safety nets:
+
+- You can save a backup file from Settings → Backup, and restore it later or on another device.
+  (The PIN is never included in backups.)
+- It takes automatic snapshots at the start of each day and before anything drastic, like a
+  reset or deleting a wheel, so mistakes can be undone.
+- If the saved data is ever damaged, the app keeps a copy instead of writing over it, and falls
+  back to the latest snapshot.
+
+**On an iPhone or iPad,** use Share → *Add to Home Screen* and open it from there. Safari may
+clear a website's data if you haven't visited for a week, but home-screen apps are left alone.
+The home-screen app also keeps its data separately from Safari, so set things up from the
+home-screen version (or move your progress over with a backup file).
+
+## Running it
+
+It's plain HTML, CSS and JavaScript, with no build step and no dependencies. It needs to be
+served over HTTP rather than opened as a file, because it uses JavaScript modules:
 
 ```sh
-npm start          # or: python3 -m http.server 8765
-# then open http://localhost:8765
+npm start        # same as: python3 -m http.server 8765
 ```
 
-## Tests
+Then open http://localhost:8765.
+
+To put it online, upload the folder to any static host (Cloudflare, Netlify, GitHub Pages and so
+on). Updates reach people right away: the service worker checks the network first and only uses
+its offline copy when the connection is down or very slow.
+
+### Tests
 
 ```sh
-npm test           # Node's built-in test runner; nothing to install
+npm test
 ```
 
-The tests cover the data layer (`js/state.js`): spinning rules, saving, backups, migrations,
-the safety nets below, and hostile or damaged backup files.
+This uses Node's built-in test runner, so there's nothing to install. The tests cover the data
+layer in `js/state.js`: the spinning rules, saving, backups, migrations from older versions, the
+safety nets above, and damaged or deliberately malicious backup files.
 
-## Deploy
+## Notes for contributors
 
-Upload the whole folder to any static host:
-
-- **Netlify Drop**: drag the folder onto https://app.netlify.com/drop
-- **GitHub Pages**: push to a repo → Settings → Pages → deploy from branch
-- **Cloudflare Pages**: same idea
-
-Updates show up immediately: the service worker checks the network first (falling back to its
-cache when offline or on a very slow connection), so there's no cache to bust. **When you add a
-file the app needs offline, add it to `CORE_FILES` in `sw.js`.**
-
-## Features
-
-- **Several wheels** (e.g. 12 Days of Christmas, Chore Wheel, What's for Dinner?), switched from
-  the title at the top. Each wheel has its own options, surprises, rules and theme
-- **Players per wheel**, one tab each with their own progress and history, or no players for a
-  shared wheel that everyone spins together
-- **Remove after spin** (per wheel): each result comes off the wheel for whoever spun it
-- **Spins per day** (per wheel): no limit, or 1–10 a day, plus a grown-up "Give 1 extra spin today"
-- Optional **surprise** text per option, revealed when spun ("Hot cocoa movie night!")
-- Presets: 12 Days of Christmas, Advent 1–24/1–25, Yes/No, Dinner, Chores, Blank
-- Themes: Christmas, Winter Wonderland, Halloween, Birthday, Classic, Midnight
-- Adjustable spin length (2–15 s), confetti, falling snow, and real recorded sounds (wooden click,
-  music box, or sleigh-bell tick, with a preview)
-- Optional grown-up PIN for settings (kid-proofing, not real security). A forgotten PIN can be
-  removed by typing "remove pin" at the prompt; progress is kept
-- Backup/restore to a JSON file
-- Installable to the home screen, and works offline after the first visit
-
-Saved data keeps its original `spinner.*` storage keys, so renaming the app never orphans anyone's progress.
-
-## Where the data lives
-
-Everything is stored in the browser's `localStorage` on that one device. Nothing is sent anywhere.
-The grown-up PIN stays on the device: it's never written to backup files, and restoring a backup
-keeps the device's own PIN.
-
-Ways it protects progress (see the top of `js/state.js`):
-
-- **Backup files**: Settings → Backup. On phones this opens the share sheet ("Save to Files").
-- **Automatic snapshots** (last 10, kept on the device): one at the start of each day, plus one
-  before every reset, wheel or player removal, preset load, restore, or erase. They can be restored from
-  Settings → Backup.
-- **Unreadable saved data is never overwritten.** It's copied to `spinner.state.unreadable.<time>`
-  (downloadable from Settings → Backup) and the newest snapshot is loaded instead. If there's no
-  room to copy it, the app stops saving rather than overwrite it, until you restore a backup or
-  erase everything.
-- **Data from a newer version is never overwritten.** An out-of-date copy of the app (say, an
-  old home-screen install) shows a "reload to update" message and saves nothing.
-- **Multiple tabs or windows:** if another copy of the app changed the data, this one reloads it
-  before spinning or opening settings, so a stale copy can't undo spins.
-- **Failed saves show a warning banner** (storage full or blocked) instead of failing silently.
-
-**iPhone/iPad:** use Share → *Add to Home Screen* and always open it from there. Safari can
-clear storage for websites that haven't been visited in 7 days; home-screen apps are exempt.
-The home-screen app also has **its own separate storage** from Safari, so set up from the
-home-screen app (the setup screen says so on iOS), or move progress across with a backup file.
-
-## Security
-
-- **No HTML injection:** everything a user types, and everything read from a backup file, is
-  escaped with `escapeHtml()` or set with `textContent`/`.value` before it reaches the page.
-- **Untrusted data is validated:** storage, snapshots and backup files all go through `normalize()`
-  in `js/state.js`, which type-checks every field and caps lengths and counts (wheels, options,
-  players, history), so a damaged or crafted file can't break the app or lock anyone out.
-- **Content-Security-Policy** (a `<meta>` tag in `index.html`): only the app's own files can load,
-  with no inline scripts or style attributes. If your host can set headers, you can send the same
-  policy as a header too.
-- The PIN is kid-proofing, not real security: anyone with the device can clear site data.
-
-## Code map
-
-| File | What it does |
-|---|---|
-| `index.html` | Page structure and the static dialogs |
-| `css/styles.css` | All styles; colors come from CSS variables set by the theme |
-| `css/fonts.css`, `fonts/` | Self-hosted fonts (Fredoka, Mountains of Christmas, Creepster) and their licenses |
-| `js/main.js` | Entry point: renders the main screen and runs spins |
-| `js/templates.js` | Small HTML snippets shared by the main screen and settings |
-| `js/state.js` | The data model (its shape is documented at the top), saving/loading, validation, migrations, and every action that changes data |
-| `js/wheel.js` | `WheelView`: draws a wheel on a canvas and animates spins |
-| `js/settings/` | The settings dialog: `index.js` (dialog and tabs), one file per tab (`wheels-tab.js`, `wheel-tab.js`, `players-tab.js`, `general-tab.js`, `backup-tab.js`), `shared.js` helpers, and `welcome.js` (first-run setup) |
-| `js/themes.js` | Theme definitions and tick-sound names; **add a theme here** |
-| `js/presets.js` | Wheel presets; **add a preset here** |
-| `js/effects.js` | Sounds, confetti, snow |
-| `js/dialogs.js` | Confirm / alert / PIN dialogs |
-| `js/icons.js` | UI icons from [Lucide](https://lucide.dev) (ISC), inlined as SVG |
-| `js/util.js` | Small shared helpers (dates, random numbers, escaping, debounce) |
-| `js/vendor/` | [canvas-confetti](https://github.com/catdad/canvas-confetti) 1.9.4 (ISC), checked in as one file; no build step |
-| `sounds/` | Recorded samples (CC0); see `sounds/README.md` for the source and how they were made |
-| `sw.js`, `manifest.webmanifest`, `icons/` | Home-screen install and offline support |
-| `tests/` | Tests for the data layer (`npm test`) |
-
-The result of a spin is chosen first with `crypto.getRandomValues` and saved right away, so a
-refresh mid-spin can't re-roll. The animation then lands on that result.
-
-If you change the shape of the saved data, bump `SCHEMA_VERSION` in `state.js` and handle the old
-shape in `normalize()`, so existing saves and backups keep working. (Version 3 introduced
-multiple wheels; older saves are converted by `migratePlayersToWheels()`, which merges players
-whose wheels were identical.)
+- **Spins are decided before the wheel moves.** The result is picked with
+  `crypto.getRandomValues` and saved immediately, then the animation lands on it. Refreshing
+  mid-spin can't re-roll.
+- **Saved data has a version.** If you change its shape, bump `SCHEMA_VERSION` in `state.js`
+  and teach `normalize()` to read the old shape, so existing saves and backup files keep
+  working. (Version 3 added multiple wheels; `migratePlayersToWheels()` converts older saves.)
+  Storage keys still start with `spinner.`, from before the app had a name; changing them would
+  strand everyone's saved progress.
+- **Anything from storage or a backup file is untrusted.** It all goes through `normalize()`,
+  which checks every field and caps sizes. Anything a user typed is escaped (`escapeHtml()`) or
+  set with `textContent`/`.value` before it reaches the page.
+- **The Content-Security-Policy** in `index.html` only allows the app's own files, with no inline
+  scripts or `style=""` attributes. Set styles from JavaScript instead.
+- **If you add a file the app needs offline,** list it in `CORE_FILES` in `sw.js`.
 
 ## Credits
 
-- Sounds: [VS Chamber Orchestra: Community Edition](https://github.com/sgossner/VSCO-2-CE) by Sam Gossner & Simon Dalzell (CC0)
-- Icons: [Lucide](https://lucide.dev) (ISC)
-- Confetti: [canvas-confetti](https://github.com/catdad/canvas-confetti) by Kiril Vatev (ISC)
-- Fonts via [Fontsource](https://fontsource.org): Fredoka (OFL 1.1), Creepster (OFL 1.1),
-  Mountains of Christmas (Apache 2.0); license files are in `fonts/`
+- Sounds from [VS Chamber Orchestra: Community Edition](https://github.com/sgossner/VSCO-2-CE)
+  by Sam Gossner and Simon Dalzell (CC0). `sounds/README.md` explains how they were trimmed.
+- Icons from [Lucide](https://lucide.dev) (ISC).
+- Confetti by [canvas-confetti](https://github.com/catdad/canvas-confetti) from Kiril Vatev (ISC).
+- Fonts via [Fontsource](https://fontsource.org): Fredoka and Creepster (OFL 1.1), Mountains of
+  Christmas (Apache 2.0).
+
+Built with the help of [Claude Code](https://claude.com/claude-code).
 
 ## License
 
-[MIT](LICENSE) © 2026 David Busse. Bundled fonts, sounds, icons and libraries keep their own
-licenses, listed under Credits.
+[MIT](LICENSE) © 2026 David Busse. The bundled fonts, sounds, icons and libraries keep their own
+licenses, listed above.
