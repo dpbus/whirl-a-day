@@ -3,6 +3,8 @@
 Spin-the-wheel picker that remembers what's been drawn, for advent calendars, chore charts and
 dinner decisions.
 
+**Try it at [whirladay.com](https://whirladay.com).**
+
 A friend wanted something for her kids' 12 Days of Christmas: each morning they spin a wheel,
 open whichever day it lands on, and that number is gone for the rest of the season. Every
 spinner I found online forgot everything between visits, so I built one that doesn't. It turned
