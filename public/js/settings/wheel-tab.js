@@ -5,6 +5,9 @@ import { getPreset } from '../presets.js';
 import { alertDialog, confirmDialog } from '../dialogs.js';
 import { icon } from '../icons.js';
 import { plural } from '../templates.js';
+import { dayKey } from '../rules.js';
+import * as online from '../store/online.js';
+import { keepLocalCopy, putOnline, showHostLink, takeOffline } from '../online-ui.js';
 import { $, displayName, escapeHtml, formatDay, range } from '../util.js';
 import { bindThemeCards, presetOptions, themeCards } from './shared.js';
 
@@ -14,10 +17,12 @@ export function render(view) {
     ${rulesSection(wheel)}
     ${optionsSection()}
     ${progressSection(wheel)}
+    ${onlineSection(wheel)}
   `;
   bindRules(view, wheel);
   bindOptions(view, wheel);
   bindProgress(view, wheel);
+  bindOnline(view, wheel);
 }
 
 /** Re-render this tab without jumping back to the top. */
@@ -54,7 +59,7 @@ function rulesSection(wheel) {
     <div class="field">
       <label for="w-per-day">Spins per day</label>
       <select id="w-per-day">
-        ${perDayChoices.map(([n, label]) => `<option value="${n}" ${n === wheel.spinsPerDay ? 'selected' : ''}>${label}</option>`).join('')}
+        ${perDayChoices.map(([n, label]) => `<option value="${n}" ${n === (wheel.spinsPerDay ?? 0) ? 'selected' : ''}>${label}</option>`).join('')}
       </select>
       <p class="hint">For example, 2 per day gets through a 24-number wheel in 12 days.</p>
     </div>`;
@@ -128,7 +133,7 @@ function optionsSection() {
 
 function renderOptionRows(view, wheel) {
   const list = $('#w-options', view.body);
-  const opened = store.openedOptions(wheel, store.activeProgress(wheel));
+  const opened = store.openedOptions(wheel, store.activePlayerId(wheel));
   const { options } = wheel;
 
   $('#w-count', view.body).textContent = `(${options.length})`;
@@ -142,7 +147,7 @@ function renderOptionRows(view, wheel) {
             <input class="opt-label" maxlength="${store.MAX_LABEL_LENGTH}" placeholder="Option" aria-label="Option ${i + 1}">
             <button type="button" class="icon-btn small opt-del" aria-label="Remove option ${i + 1}">${icon('x', { size: 18 })}</button>
             <input class="opt-surprise" maxlength="${store.MAX_SURPRISE_LENGTH}" placeholder="🎁 Surprise (optional)" aria-label="Surprise for option ${i + 1}">
-            ${entry ? `<span class="opt-status">✓ spun ${formatDay(entry.date)}</span>` : ''}
+            ${entry ? `<span class="opt-status">✓ spun ${formatDay(dayKey(entry.at, wheel.timeZone))}</span>` : ''}
           </li>`;
         })
         .join('')
@@ -214,46 +219,52 @@ function bindOptions(view, wheel) {
 // ================================================================ progress
 
 function progressSection(wheel) {
-  const progress = store.activeProgress(wheel);
   const player = store.activePlayer(wheel);
-  const hasSpins = progress.history.length > 0;
+  const playerId = player?.id ?? null;
+  const hasSpins = store.spinsFor(wheel, playerId).length > 0;
   return `
     <h3>Progress</h3>
     ${wheel.players.length > 1 ? `
     <div class="field">
       <label for="w-player">For</label>
       <select id="w-player">
-        ${wheel.players.map((p) => `<option value="${escapeHtml(p.id)}" ${p.id === player.id ? 'selected' : ''}>${escapeHtml(displayName(p))}</option>`).join('')}
+        ${wheel.players.map((p) => `<option value="${escapeHtml(p.id)}" ${p.id === playerId ? 'selected' : ''}>${escapeHtml(displayName(p))}</option>`).join('')}
       </select>
     </div>` : ''}
-    <p class="hint" id="w-progress-summary">${escapeHtml(progressSummary(wheel, progress, player))}</p>
+    <p class="hint" id="w-progress-summary">${escapeHtml(progressSummary(wheel, player))}</p>
     <div class="row wrap">
       <button type="button" class="btn" id="w-undo" ${hasSpins ? '' : 'disabled'}>Undo last spin</button>
-      <button type="button" class="btn" id="w-extra" ${wheel.spinsPerDay ? '' : 'disabled'}>Give 1 extra spin today</button>
+      <button type="button" class="btn" id="w-extra" ${wheel.spinsPerDay && (playerId || wheel.sharedWheel) ? '' : 'disabled'}>Give 1 extra spin today</button>
       <button type="button" class="btn danger" id="w-reset" ${hasSpins ? '' : 'disabled'}>Reset progress</button>
     </div>
-    ${wheel.spinsPerDay ? '' : '<p class="hint">Extra spins are only needed when spins per day are limited.</p>'}`;
+    ${wheel.spinsPerDay ? '' : '<p class="hint">Extra spins are only needed when spins per day are limited.</p>'}
+    ${wheel.sharedWheel && wheel.players.length ? '<p class="hint">On a shared wheel, undo and reset apply to the whole wheel.</p>' : ''}`;
 }
 
 /** e.g. "Ava: 3 spins so far — last: “7” on Dec 3. Today: 1 spun, 0 left." */
-function progressSummary(wheel, progress, player) {
-  const last = progress.history.at(-1);
-  let text = `${player ? `${displayName(player)}: ` : ''}${plural(progress.history.length, 'spin')} so far`;
-  if (last) text += ` — last: “${last.label}” on ${formatDay(last.date)}`;
+function progressSummary(wheel, player) {
+  const playerId = player?.id ?? null;
+  const spins = store.spinsFor(wheel, playerId);
+  const last = spins.at(-1);
+  const lastOption = last && store.findOption(wheel, last.optionId);
+  const forWhom = player && !wheel.sharedWheel ? `${displayName(player)}: ` : '';
+  let text = `${forWhom}${plural(spins.length, 'spin')} so far`;
+  if (last) text += ` — last: “${lastOption?.label ?? 'a removed option'}” on ${formatDay(dayKey(last.at, wheel.timeZone))}`;
   text += '.';
   if (wheel.spinsPerDay) {
-    const bonus = store.bonusToday(progress);
-    text += ` Today: ${store.spinsToday(progress)} spun, ${store.spinsLeftToday(wheel, progress)} left`;
+    const bonus = store.bonusToday(wheel, playerId);
+    const who = player && wheel.sharedWheel && !wheel.sharedDailyLimit ? ` for ${displayName(player)}` : '';
+    text += ` Today${who}: ${store.spinsToday(wheel, playerId)} spun, ${store.spinsLeftToday(wheel, playerId)} left`;
     text += bonus ? ` (includes ${bonus} extra).` : '.';
   }
   return text;
 }
 
 function bindProgress(view, wheel) {
-  /** The wheel and progress as they are now (the data may have been reloaded meanwhile). */
+  /** The wheel and player as they are now (the data may have been reloaded meanwhile). */
   const current = () => {
     const fresh = store.getWheel(wheel.id);
-    return fresh && { wheel: fresh, progress: store.activeProgress(fresh), player: store.activePlayer(fresh) };
+    return fresh && { wheel: fresh, player: store.activePlayer(fresh), playerId: store.activePlayerId(fresh) };
   };
 
   $('#w-player', view.body)?.addEventListener('change', (event) => {
@@ -263,34 +274,103 @@ function bindProgress(view, wheel) {
   });
 
   $('#w-undo', view.body).addEventListener('click', async () => {
-    const last = current().progress.history.at(-1);
-    const ok = await confirmDialog(`Undo “${last.label}” (${formatDay(last.date)})? It goes back on the wheel and can be spun again.`, {
+    const { wheel: w, playerId } = current();
+    const last = store.spinsFor(w, playerId).at(-1);
+    if (!last) return;
+    const label = store.findOption(w, last.optionId)?.label ?? 'a removed option';
+    const ok = await confirmDialog(`Undo “${label}” (${formatDay(dayKey(last.at, w.timeZone))})? It goes back on the wheel and can be spun again.`, {
       title: 'Undo last spin?',
       ok: 'Undo',
     });
     const now = current();
     if (!ok || !now) return;
-    store.undoLastSpin(now.wheel, now.progress);
+    store.undoLastSpin(now.wheel, now.playerId);
     view.changed();
     refresh(view);
   });
 
   $('#w-extra', view.body).addEventListener('click', () => {
-    store.allowExtraSpin(current().progress);
+    const now = current();
+    store.allowExtraSpin(now.wheel, now.playerId);
     view.changed();
     refresh(view);
   });
 
   $('#w-reset', view.body).addEventListener('click', async () => {
-    const { player } = current();
-    const message = player
-      ? `Reset ${displayName(player)}'s progress on this wheel? Every option goes back on and the history is cleared.`
-      : 'Reset this wheel? Every option goes back on and the history is cleared.';
+    const { wheel: w, player } = current();
+    const message =
+      player && !w.sharedWheel
+        ? `Reset ${displayName(player)}'s progress on this wheel? Every option goes back on and the history is cleared.`
+        : 'Reset this wheel? Every option goes back on and the history is cleared.';
     const ok = await confirmDialog(message, { title: 'Reset progress?', ok: 'Reset', danger: true });
     const now = current();
     if (!ok || !now) return;
-    store.resetProgress(now.wheel, now.progress);
+    store.resetProgress(now.wheel, now.playerId);
     view.changed();
     refresh(view);
+  });
+}
+
+// ================================================================ online
+
+function onlineSection(wheel) {
+  if (!wheel.online) {
+    return `
+      <h3>Play on everyone's phones</h3>
+      <p class="hint">Put this wheel online and everyone can spin on their own phone: you share one QR code, and you see everyone's spins here.</p>
+      <button type="button" class="btn" id="w-put-online">${icon('cloud-upload', { size: 18 })} Put online…</button>`;
+  }
+  const status = online.connectionStatus(wheel);
+  if (status === 'gone' || status === 'signed-out') {
+    return `
+      <h3>Online</h3>
+      <p class="hint">${status === 'gone' ? 'This wheel was deleted from whirladay.com.' : "This device isn't signed in to this wheel anymore. Open your host link here to manage it again."} You can keep the last copy as a wheel on this device.</p>
+      <button type="button" class="btn" id="w-keep-copy">Keep a copy on this device</button>`;
+  }
+  return `
+    <h3>Online</h3>
+    <p class="hint">${wheel.sharedWheel ? 'One wheel for everyone: every spin plays on every phone.' : 'Everyone gets their own wheel.'} It lives on whirladay.com and is deleted automatically 60 days after it was last used.</p>
+    <div class="toggles">
+      ${wheel.sharedWheel
+        ? `<label class="switch"><input type="checkbox" id="w-group-limit" ${wheel.spinsPerDay ? '' : 'disabled'}><span>The whole group shares the day's spins</span></label>`
+        : '<label class="switch"><input type="checkbox" id="w-share-spins"><span>Players see each other’s spins</span></label>'}
+    </div>
+    ${wheel.sharedWheel && !wheel.spinsPerDay ? '' : `<p class="hint">${wheel.sharedWheel ? 'Off: each person gets the spins per day. On: that many for the whole group, first come, first served.' : 'Off: only you see everyone’s spins. On: each player also sees the others’ results (not their surprises).'}</p>`}
+    <div class="row wrap">
+      <button type="button" class="btn" id="w-host-link">${icon('link', { size: 18 })} Host link</button>
+      <button type="button" class="btn danger" id="w-take-offline">Take offline…</button>
+    </div>
+    <p class="hint">The host link lets you manage this wheel from another device. Taking it offline deletes it from whirladay.com and keeps it here.</p>`;
+}
+
+function bindOnline(view, wheel) {
+  $('#w-put-online', view.body)?.addEventListener('click', () => {
+    view.close();
+    putOnline(wheel);
+  });
+  $('#w-keep-copy', view.body)?.addEventListener('click', () => {
+    keepLocalCopy(wheel);
+    refresh(view);
+  });
+  const groupLimit = $('#w-group-limit', view.body);
+  if (groupLimit) {
+    groupLimit.checked = wheel.sharedDailyLimit === true;
+    groupLimit.addEventListener('change', () => {
+      store.setWheelProps(wheel, { sharedDailyLimit: groupLimit.checked });
+      view.changed();
+      refresh(view);
+    });
+  }
+  const shareSpins = $('#w-share-spins', view.body);
+  if (shareSpins) {
+    shareSpins.checked = wheel.showSpinsToEveryone === true;
+    shareSpins.addEventListener('change', () => {
+      store.setWheelProps(wheel, { showSpinsToEveryone: shareSpins.checked });
+      view.changed();
+    });
+  }
+  $('#w-host-link', view.body)?.addEventListener('click', () => showHostLink(wheel));
+  $('#w-take-offline', view.body)?.addEventListener('click', async () => {
+    if (await takeOffline(wheel)) refresh(view);
   });
 }

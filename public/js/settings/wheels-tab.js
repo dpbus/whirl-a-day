@@ -47,10 +47,13 @@ function renderWheelList(view) {
       view.showTab('wheels', { keepScroll: true });
     },
     async onDelete(id) {
-      const ok = await confirmDialog(
-        `Remove “${store.wheelTitle(store.getWheel(id))}” and everyone's progress on it? (A snapshot is kept, so this can be undone from Backup.)`,
-        { title: 'Remove wheel?', ok: 'Remove', danger: true },
-      );
+      const wheel = store.getWheel(id);
+      const message = !wheel.online
+        ? `Remove “${store.wheelTitle(wheel)}” and everyone's progress on it? (A snapshot is kept, so this can be undone from Backup.)`
+        : wheel.online.role === 'host'
+          ? `Remove “${store.wheelTitle(wheel)}” from this device? It stays online for the other phones until it expires. You can only manage it again with its host link. To delete it from whirladay.com, use “Take offline” in Edit wheel first.`
+          : `Leave “${store.wheelTitle(wheel)}” on this phone? To come back, scan the QR code again; the host may need to release your name first.`;
+      const ok = await confirmDialog(message, { title: wheel.online?.role === 'player' ? 'Leave wheel?' : 'Remove wheel?', ok: 'Remove', danger: true });
       if (!ok || !store.getWheel(id)) return;
       store.removeWheel(id);
       view.changed();
@@ -84,7 +87,7 @@ function newWheelForm() {
       </div>
       ${playerNamesField('ws', {
         hint: PLAYERS_HINT,
-        extraButtons: active?.players.length
+        extraButtons: active?.players.length && store.canManage(active)
           ? `<button type="button" class="btn small" id="ws-copy-players">Use the same players as “${escapeHtml(store.wheelTitle(active))}”</button>`
           : '',
       })}

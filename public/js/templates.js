@@ -7,8 +7,16 @@ import { displayName, escapeHtml } from './util.js';
 
 export const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
-/** Who spins a wheel: "Ava, Ben", or "Everyone" for a shared wheel. */
-export const whoSpins = (wheel) => (wheel.players.length ? wheel.players.map(displayName).join(', ') : 'Everyone');
+/** Who spins a wheel: "Ava, Ben", "Everyone", or for online wheels e.g. "Online · You're Ava". */
+export function whoSpins(wheel) {
+  const names = wheel.players.length ? wheel.players.map(displayName).join(', ') : 'Everyone';
+  if (!wheel.online) return names;
+  if (wheel.online.role === 'player') {
+    const me = wheel.players.find((p) => p.id === wheel.online.playerId);
+    return me ? `Online · You're ${displayName(me)}` : 'Online';
+  }
+  return `Online · ${wheel.players.length ? names : 'Nobody has joined yet'}`;
+}
 
 /** A button showing a wheel's theme emoji, title and who spins it. `attrs` is trusted markup. */
 export function wheelButton(wheel, { current = false, attrs = '' } = {}) {

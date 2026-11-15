@@ -24,6 +24,10 @@ const CORE_FILES = [
   'fonts/creepster-latin-400-normal.woff2',
   'js/main.js',
   'js/state.js',
+  'js/rules.js',
+  'js/store/online.js',
+  'js/online-ui.js',
+  'js/qr.js',
   'js/wheel.js',
   'js/effects.js',
   'js/themes.js',
@@ -41,6 +45,7 @@ const CORE_FILES = [
   'js/settings/backup-tab.js',
   'js/settings/welcome.js',
   'js/vendor/canvas-confetti-1.9.4.js',
+  'js/vendor/qrcode-generator-2.0.4.js',
   'icons/icon.svg',
   'icons/icon-180.png',
   'icons/icon-512.png',
@@ -78,8 +83,11 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   const { request } = event;
-  // Only handle our own files; everything else goes straight to the network.
-  if (request.method !== 'GET' || new URL(request.url).origin !== self.location.origin) return;
+  // Only handle our own files; everything else goes straight to the network. Online wheels
+  // (/api/) and join links (/j/) always need the server, so they're never cached.
+  const url = new URL(request.url);
+  if (request.method !== 'GET' || url.origin !== self.location.origin) return;
+  if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/j/')) return;
   event.respondWith(request.mode === 'navigate' ? loadPage(event) : loadFile(event));
 });
 

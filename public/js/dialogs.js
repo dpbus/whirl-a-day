@@ -4,7 +4,7 @@ import { escapeHtml, uid } from './util.js';
 import { icon } from './icons.js';
 
 /** Create a modal <dialog> whose heading (an element with id = titleId) names it. */
-function makeDialog(className, html, titleId) {
+export function makeDialog(className, html, titleId) {
   const dialog = document.createElement('dialog');
   dialog.className = `dialog ${className}`;
   dialog.setAttribute('aria-labelledby', titleId);

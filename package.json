@@ -5,7 +5,11 @@
   "description": "Spinner wheels that remember what each player has already spun: advent calendars, chore wheels, dinner pickers.",
   "type": "module",
   "scripts": {
-    "start": "python3 -m http.server 8765 --directory public",
+    "start": "wrangler dev --port 8765",
+    "start:static": "python3 -m http.server 8765 --directory public",
     "test": "node --test tests/"
+  },
+  "devDependencies": {
+    "wrangler": "4.156.0"
   }
 }

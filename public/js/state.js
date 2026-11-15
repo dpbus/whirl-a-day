@@ -1,63 +1,49 @@
-// All app data lives here and is saved to localStorage.
-// Every function that changes data saves it; the UI re-renders separately.
+// This device's data: the list of wheels, settings, saving, snapshots and backup files.
 //
-// Shape (version 3):
-// {
-//   version: 3,
-//   activeWheelId: string|null,
-//   settings: { theme, spinSeconds, sound, tickSound, confetti, pin, lastBackup },
-//                // `theme` is the default for new wheels and the setup screen
-//   wheels: [{
-//     id, title, theme,
-//     options: [{ id, label, surprise }],
-//     removeAfterSpin: boolean,
-//     spinsPerDay: number,              // 0 = no limit
-//     players: [{ id, name, ...progress }],
-//     activePlayerId: string|null,
-//     shared: progress                  // used when the wheel has no players
-//   }]
-// }
-// progress = {
-//   remaining: [optionId],              // options still on the wheel (when removeAfterSpin)
-//   history: [{ optionId, label, date: 'YYYY-MM-DD', at: ISO }],
-//   bonus: { date: 'YYYY-MM-DD', count }|null   // extra spins a grown-up granted for that day
-// }
-//
-// Older saves (v1/v2: one wheel per player) are converted by migratePlayersToWheels().
-//
-// Safety nets against losing progress:
-//  - Saved data that can't be read is never overwritten: it's copied aside and the newest
-//    automatic snapshot is loaded. If it can't be copied aside, saving stops instead.
-//  - Automatic snapshots: one at the start of each day, plus one before every destructive
-//    action (reset, remove, load preset, restore, erase). Restorable from Settings → Backup.
-//  - storageChangedElsewhere() lets the UI reload when another tab/window changed the data,
-//    so a stale copy never overwrites newer progress.
-//  - saveHealthy() reports whether the last save actually worked.
-//  - Anything read from storage, snapshots or backup files goes through normalize(), which
-//    type-checks and bounds every field, so damaged or crafted data can't break the app.
-import { displayName, todayKey, uid } from './util.js';
-import { wheelFromPreset, getPreset } from './presets.js';
+// Every wheel has the shape described in rules.js, and every change to one goes through act(),
+// which applies a named rules action. A local wheel is changed and saved right here. An online
+// wheel (one with an `online` pointer) is a last-known copy of a wheel that lives on the server:
+// act() applies the change to the copy straight away and hands it to the online connection,
+// which sends it on; the server's reply then replaces the copy (see store/online.js).
 import { THEMES, TICK_STYLES, DEFAULT_THEME_ID } from './themes.js';
+import { getPreset, wheelFromPreset } from './presets.js';
+import * as rules from './rules.js';
+import { displayName, todayKey, uid } from './util.js';
 
-// Keys keep the original 'spinner.' prefix: renaming them would orphan existing saves.
-export const STORAGE_KEY = 'spinner.state';
-const SNAPSHOT_KEY = 'spinner.snapshots';
-const UNREADABLE_PREFIX = 'spinner.state.unreadable.';
+export {
+  MAX_LABEL_LENGTH,
+  MAX_NAME_LENGTH,
+  MAX_OPTIONS,
+  MAX_PLAYERS,
+  MAX_SPINS_PER_DAY,
+  MAX_SURPRISE_LENGTH,
+  MAX_TITLE_LENGTH,
+  optionRoom,
+  spinPool,
+  spinStatus,
+  spinsLeftToday,
+  spinsToday,
+  bonusToday,
+  openedOptions,
+  spinsFor,
+  wheelTitle,
+  findPlayer,
+  findOption,
+} from './rules.js';
+
+export const STORAGE_KEY = 'whirladay.state';
+const SNAPSHOT_KEY = 'whirladay.snapshots';
+const UNREADABLE_PREFIX = 'whirladay.state.unreadable.';
 const MAX_SNAPSHOTS = 10;
 const MAX_UNREADABLE_COPIES = 3;
 const SAVE_DELAY_MS = 400;
 
-export const SCHEMA_VERSION = 3;
-export const MAX_SPINS_PER_DAY = 10;
-export const MAX_LABEL_LENGTH = 40;
-export const MAX_SURPRISE_LENGTH = 200;
-export const MAX_NAME_LENGTH = 24;
-export const MAX_TITLE_LENGTH = 60;
-// Limits on how much data a wheel can hold, so a huge or crafted backup can't freeze the app.
+// Versions 1–3 were the app before online wheels (saved under 'spinner.*' keys, a different
+// shape). They aren't converted; numbering carries on from 4 so they can be told apart.
+export const SCHEMA_VERSION = 4;
+const FIRST_SUPPORTED_VERSION = 4;
+// Limits on how much this device keeps, so a huge or crafted backup can't freeze the app.
 export const MAX_WHEELS = 50;
-export const MAX_OPTIONS = 200;
-export const MAX_PLAYERS = 20;
-const MAX_HISTORY = 1000; // per player; the oldest entries are dropped beyond this
 
 /** Thrown for data saved by a newer version of the app, which this version must not overwrite. */
 export class NewerVersionError extends Error {
@@ -74,6 +60,7 @@ let loadProblem = null; // null | 'unavailable' | 'unreadable' | 'unreadable-rea
 let recoveredFrom = null; // ISO time of the snapshot loaded after unreadable data, if any
 let readOnly = false; // true when stored data must not be overwritten (see load())
 let saveTimer = 0;
+let sendOnline = () => Promise.resolve(); // set by the online connection (setOnlineSender)
 
 function defaultSettings() {
   return { theme: DEFAULT_THEME_ID, spinSeconds: 6, sound: true, tickSound: 'auto', confetti: true, pin: '', lastBackup: null };
@@ -221,10 +208,14 @@ export function listUnreadableData() {
 
 // ================================================================ Backup files
 
-/** Backup file contents. The PIN stays on this device and is never written to a file. */
+/**
+ * Backup file contents. The PIN and online sign-in tokens stay on this device and are never
+ * written to a file: an online wheel is backed up as its last-known copy only.
+ */
 export function exportJson() {
   const { pin, ...settings } = state.settings;
-  return JSON.stringify({ ...state, settings, exportedAt: new Date().toISOString() }, null, 2);
+  const wheels = state.wheels.map((w) => (w.online ? { ...w, online: { ...w.online, token: '' } } : w));
+  return JSON.stringify({ ...state, settings, wheels, exportedAt: new Date().toISOString() }, null, 2);
 }
 
 /** Validate a parsed backup without applying it. Throws if it isn't one. */
@@ -303,29 +294,24 @@ export function restoreSnapshot(at) {
   adopt(normalize(snapshot.state), 'Before restoring a snapshot');
 }
 
-/** Short description of a saved state (any version), e.g. "12 Days: Ava 3, Ben 1 · Dinner: 5 spins". */
+/** Short description of a saved state, e.g. "12 Days: Ava 3, Ben 1 · Dinner: 5 spins". */
 function summarize(data) {
-  const count = (p) => (Array.isArray(p?.history) ? p.history.length : 0);
-  const name = (p) => displayName({ name: text(p?.name, MAX_NAME_LENGTH) });
-  if (Array.isArray(data?.wheels)) {
-    return data.wheels
-      .filter(isObject)
-      .map((w) => {
-        const title = text(w.title, 30).trim() || 'Wheel';
-        const players = Array.isArray(w.players) ? w.players.filter(isObject) : [];
-        return players.length
-          ? `${title}: ${players.map((p) => `${name(p)} ${count(p)}`).join(', ')}`
-          : `${title}: ${plural(count(w.shared), 'spin')}`;
-      })
-      .join(' · ');
-  }
-  if (Array.isArray(data?.players)) {
-    return data.players.filter(isObject).map((p) => `${name(p)}: ${plural(count(p), 'spin')}`).join(', ');
-  }
-  return '';
+  if (!Array.isArray(data?.wheels)) return '';
+  return data.wheels
+    .filter(isObject)
+    .map((w) => {
+      const title = text(w.title, 30).trim() || 'Wheel';
+      const players = Array.isArray(w.players) ? w.players.filter(isObject) : [];
+      const spins = Array.isArray(w.spins) ? w.spins.filter(isObject) : [];
+      const name = (p) => displayName({ name: text(p?.name, rules.MAX_NAME_LENGTH) });
+      return players.length && !w.sharedWheel
+        ? `${title}: ${players.map((p) => `${name(p)} ${spins.filter((s) => s.playerId === p.id).length}`).join(', ')}`
+        : `${title}: ${plural(spins.length, 'spin')}`;
+    })
+    .join(' · ');
 }
 
-// ================================================================ Validation & migration
+// ================================================================ Validation
 
 const clamp = (n, lo, hi) => Math.min(hi, Math.max(lo, n));
 const isObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -334,30 +320,21 @@ const isTheme = (v) => typeof v === 'string' && Object.hasOwn(THEMES, v);
 const text = (v, max) => (v == null ? '' : String(v)).slice(0, max);
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
-/** Keep an imported id if it's a sensible, unused string; otherwise make a new one. */
-function uniqueId(raw, used) {
-  let id = typeof raw === 'string' || typeof raw === 'number' ? String(raw).slice(0, 64) : '';
-  if (!id || used.has(id)) id = uid();
-  used.add(id);
-  return id;
-}
-
-// Build a clean state from untrusted data (storage, backup file, snapshot) of any version.
+// Build a clean state from untrusted data (storage, backup file, snapshot).
 function normalize(data) {
-  if (isObject(data) && Number(data.version) > SCHEMA_VERSION) throw new NewerVersionError();
-  if (isObject(data) && Array.isArray(data.wheels)) return normalizeV3(data);
-  if (isObject(data) && Array.isArray(data.players)) return normalizeV3(migratePlayersToWheels(data));
-  throw new Error("This doesn't look like a Whirl-a-Day backup file.");
-}
-
-function normalizeV3(data) {
+  const version = Number(data?.version);
+  if (isObject(data) && (Array.isArray(data.players) || version < FIRST_SUPPORTED_VERSION)) {
+    throw new Error("This backup is from an older version of Whirl-a-Day and can't be restored.");
+  }
+  if (!isObject(data) || !Array.isArray(data.wheels)) throw new Error("This doesn't look like a Whirl-a-Day backup file.");
+  if (version > SCHEMA_VERSION) throw new NewerVersionError();
   const next = emptyState();
   next.settings = normalizeSettings(data.settings);
-  const wheelIds = new Set();
+  const ids = new Set();
   next.wheels = data.wheels
     .filter(isObject)
     .slice(0, MAX_WHEELS)
-    .map((w) => normalizeWheel(w, wheelIds, next.settings.theme));
+    .map((w) => normalizeDeviceWheel(w, ids, next.settings.theme));
   next.activeWheelId = next.wheels.some((w) => w.id === data.activeWheelId) ? data.activeWheelId : (next.wheels[0]?.id ?? null);
   return next;
 }
@@ -376,121 +353,36 @@ function normalizeSettings(raw) {
   };
 }
 
-function normalizeWheel(w, usedIds, defaultTheme) {
-  const optionIds = new Set();
-  const options = (Array.isArray(w.options) ? w.options : []).filter(isObject).slice(0, MAX_OPTIONS).map((o) => ({
-    id: uniqueId(o.id, optionIds),
-    label: text(o.label, MAX_LABEL_LENGTH),
-    surprise: text(o.surprise, MAX_SURPRISE_LENGTH),
-  }));
-  const playerIds = new Set();
-  const players = (Array.isArray(w.players) ? w.players : []).filter(isObject).slice(0, MAX_PLAYERS).map((p) => ({
-    id: uniqueId(p.id, playerIds),
-    name: text(p.name ?? 'Player', MAX_NAME_LENGTH),
-    ...normalizeProgress(p, optionIds),
-  }));
+/** A wheel as this device keeps it: the rules shape, plus the selected tab and any online pointer. */
+function normalizeDeviceWheel(raw, usedIds, defaultTheme) {
+  const wheel = rules.normalizeWheel(raw, { defaultTheme });
+  if (usedIds.has(wheel.id)) wheel.id = uid();
+  usedIds.add(wheel.id);
+  for (const player of wheel.players) delete player.tokenHash; // only the server holds these
+  const online = normalizeOnline(raw.online, wheel);
+  if (online) wheel.online = online;
+  else wheel.sharedWheel = wheel.players.length === 0; // on one device, a wheel without players is shared
+  wheel.activePlayerId = wheel.players.some((p) => p.id === raw.activePlayerId) ? raw.activePlayerId : (wheel.players[0]?.id ?? null);
+  return wheel;
+}
+
+/** The pointer from this device's copy to a wheel on the server. */
+function normalizeOnline(raw, wheel) {
+  if (!isObject(raw) || !isWheelId(raw.wheelId) || (raw.role !== 'host' && raw.role !== 'player')) return null;
   return {
-    id: uniqueId(w.id, usedIds),
-    title: text(w.title, MAX_TITLE_LENGTH),
-    theme: isTheme(w.theme) ? w.theme : defaultTheme,
-    options,
-    removeAfterSpin: w.removeAfterSpin !== false,
-    spinsPerDay: readSpinsPerDay(w),
-    players,
-    activePlayerId: players.some((p) => p.id === w.activePlayerId) ? w.activePlayerId : (players[0]?.id ?? null),
-    shared: normalizeProgress(isObject(w.shared) ? w.shared : {}, optionIds),
+    wheelId: raw.wheelId,
+    role: raw.role,
+    token: isToken(raw.token) ? raw.token : '', // empty: signed out (e.g. restored from a backup)
+    playerId: raw.role === 'player' && wheel.players.some((p) => p.id === raw.playerId) ? raw.playerId : null,
+    joinCode: isJoinCode(raw.joinCode) ? raw.joinCode : '',
+    joinOpen: raw.joinOpen !== false,
+    lastActiveAt: typeof raw.lastActiveAt === 'string' && !Number.isNaN(Date.parse(raw.lastActiveAt)) ? raw.lastActiveAt.slice(0, 40) : '',
   };
 }
 
-function normalizeProgress(p, optionIds) {
-  const remaining = Array.isArray(p.remaining) ? p.remaining.map(String).filter((id) => optionIds.has(id)) : [...optionIds];
-  const history = (Array.isArray(p.history) ? p.history : [])
-    .filter((h) => isObject(h) && h.optionId != null)
-    .slice(-MAX_HISTORY)
-    .map((h) => ({
-      optionId: String(h.optionId),
-      label: text(h.label, MAX_LABEL_LENGTH),
-      date: isDateKey(h.date) ? h.date : '',
-      at: typeof h.at === 'string' ? h.at.slice(0, 40) : '',
-    }));
-  return { remaining: [...new Set(remaining)], history, bonus: readBonus(p) };
-}
-
-/** v1 had an on/off `dailyLock`; v2+ has a number. Accept either. */
-function readSpinsPerDay(wheel) {
-  const n = Number(wheel?.spinsPerDay);
-  if (wheel?.spinsPerDay != null && wheel.spinsPerDay !== '' && Number.isFinite(n)) {
-    return clamp(Math.trunc(n), 0, MAX_SPINS_PER_DAY);
-  }
-  return wheel?.dailyLock ? 1 : 0;
-}
-
-function readBonus(p) {
-  if (isObject(p.bonus) && isDateKey(p.bonus.date)) {
-    return { date: p.bonus.date, count: clamp(Math.trunc(Number(p.bonus.count)) || 0, 0, 50) };
-  }
-  // v1: a single granted extra spin
-  return isDateKey(p.extraSpinDate) ? { date: p.extraSpinDate, count: 1 } : null;
-}
-
-/**
- * v1/v2 → v3. Before v3 every player had their own copy of a wheel. Players whose wheels are
- * identical (title, options, surprises, rules) become one wheel with those players; anyone
- * whose wheel differs gets a wheel of their own. Option ids are remapped by position so each
- * player's history and remaining options point at the shared wheel's options.
- * Returns raw v3-shaped data; normalizeV3() validates it afterwards.
- */
-function migratePlayersToWheels(data) {
-  const theme = isTheme(data.settings?.theme) ? data.settings.theme : DEFAULT_THEME_ID;
-  const groups = new Map(); // signature → wheel
-  let activeWheelId = null;
-
-  for (const p of data.players.filter(isObject)) {
-    const old = isObject(p.wheel) ? p.wheel : {};
-    const options = (Array.isArray(old.options) ? old.options : []).filter(isObject);
-    const removeAfterSpin = old.removeAfterSpin !== false;
-    const spinsPerDay = readSpinsPerDay(old);
-    const signature = JSON.stringify([
-      text(old.title, MAX_TITLE_LENGTH),
-      options.map((o) => [text(o.label, MAX_LABEL_LENGTH), text(o.surprise, MAX_SURPRISE_LENGTH)]),
-      removeAfterSpin,
-      spinsPerDay,
-    ]);
-
-    let wheel = groups.get(signature);
-    if (!wheel) {
-      const ids = new Set();
-      wheel = {
-        id: uid(),
-        title: old.title,
-        theme,
-        options: options.map((o) => ({ id: uniqueId(o.id, ids), label: o.label, surprise: o.surprise })),
-        removeAfterSpin,
-        spinsPerDay,
-        players: [],
-        activePlayerId: null,
-        shared: {},
-      };
-      groups.set(signature, wheel);
-    }
-
-    const idMap = new Map(options.map((o, i) => [String(o.id), wheel.options[i].id]));
-    const mapId = (id) => idMap.get(String(id)) ?? String(id);
-    wheel.players.push({
-      id: p.id,
-      name: p.name,
-      remaining: Array.isArray(p.remaining) ? p.remaining.map(mapId) : undefined,
-      history: (Array.isArray(p.history) ? p.history : []).filter(isObject).map((h) => ({ ...h, optionId: mapId(h.optionId) })),
-      bonus: p.bonus,
-      extraSpinDate: p.extraSpinDate,
-    });
-    if (p.id === data.activePlayerId) {
-      activeWheelId = wheel.id;
-      wheel.activePlayerId = p.id;
-    }
-  }
-  return { version: SCHEMA_VERSION, settings: data.settings, activeWheelId, wheels: [...groups.values()] };
-}
+export const isWheelId = (v) => typeof v === 'string' && /^[0-9a-f]{64}$/.test(v);
+export const isToken = (v) => typeof v === 'string' && /^[\w-]{16,64}$/.test(v);
+export const isJoinCode = (v) => typeof v === 'string' && /^[0-9A-Z]{4,12}$/.test(v);
 
 // ================================================================ Settings
 
@@ -501,7 +393,6 @@ export function updateSettings(patch, { soon = false } = {}) {
   else save();
 }
 
-
 // ================================================================ Wheels
 
 export const getWheel = (id) => state.wheels.find((w) => w.id === id) ?? null;
@@ -510,23 +401,29 @@ export function activeWheel() {
   return getWheel(state.activeWheelId) ?? state.wheels[0] ?? null;
 }
 
-export const wheelTitle = (wheel) => wheel?.title?.trim() || 'Untitled wheel';
-export const isShared = (wheel) => wheel.players.length === 0;
+export const isShared = (wheel) => wheel.sharedWheel;
 
-/** The selected player on a wheel, or null for a shared wheel. */
+/** 'owner' for a wheel that lives on this device; 'host' or 'player' for an online one. */
+export const roleOf = (wheel) => wheel?.online?.role ?? 'owner';
+
+/** Can this device change the wheel's options, rules and players? */
+export const canManage = (wheel) => roleOf(wheel) !== 'player';
+
+/** Has this device lost its sign-in to an online wheel (restored from a backup, released)? */
+export const isSignedOut = (wheel) => Boolean(wheel?.online && !wheel.online.token);
+
+/**
+ * Who spins on this device right now: the player this phone joined as, the selected tab, or
+ * null (a shared wheel with nobody selected).
+ */
 export function activePlayer(wheel) {
-  if (!wheel?.players.length) return null;
-  return wheel.players.find((p) => p.id === wheel.activePlayerId) ?? wheel.players[0];
+  if (!wheel) return null;
+  if (roleOf(wheel) === 'player') return rules.findPlayer(wheel, wheel.online.playerId);
+  if (!wheel.players.length) return null;
+  return rules.findPlayer(wheel, wheel.activePlayerId) ?? wheel.players[0];
 }
 
-/** Whose progress the wheel shows: the selected player's, or the shared progress. */
-export function activeProgress(wheel) {
-  return activePlayer(wheel) ?? wheel.shared;
-}
-
-const allProgress = (wheel) => [...wheel.players, wheel.shared];
-
-const freshProgress = (wheel) => ({ remaining: wheel.options.map((o) => o.id), history: [], bonus: null });
+export const activePlayerId = (wheel) => activePlayer(wheel)?.id ?? null;
 
 export function setActiveWheel(id) {
   if (getWheel(id)) {
@@ -542,19 +439,14 @@ export function addWheel({ presetId, title, theme, playerNames = [] }) {
   if (!canAddWheel()) throw new Error(`You can have up to ${MAX_WHEELS} wheels.`);
   const base = wheelFromPreset(presetId);
   const preset = getPreset(presetId);
-  const wheel = {
-    id: uid(),
-    title: text(title?.trim() || base.title, MAX_TITLE_LENGTH),
+  const wheel = rules.newWheel({
+    title: title?.trim() || base.title,
     theme: isTheme(theme) ? theme : isTheme(preset.theme) ? preset.theme : state.settings.theme,
-    options: base.options,
+    options: base.options.map((o) => o.label),
     removeAfterSpin: base.removeAfterSpin,
     spinsPerDay: base.spinsPerDay,
-    players: [],
-    activePlayerId: null,
-    shared: null,
-  };
-  wheel.shared = freshProgress(wheel);
-  for (const name of playerNames.slice(0, MAX_PLAYERS)) wheel.players.push({ id: uid(), name: text(name, MAX_NAME_LENGTH), ...freshProgress(wheel) });
+    players: playerNames.slice(0, rules.MAX_PLAYERS),
+  });
   wheel.activePlayerId = wheel.players[0]?.id ?? null;
   state.wheels.push(wheel);
   state.activeWheelId = wheel.id;
@@ -562,127 +454,131 @@ export function addWheel({ presetId, title, theme, playerNames = [] }) {
   return wheel;
 }
 
+/** Take a wheel off this device. (An online wheel stays on the server until it expires.) */
 export function removeWheel(id) {
   const wheel = getWheel(id);
   if (!wheel) return;
-  takeSnapshot(`Before removing the “${wheelTitle(wheel)}” wheel`);
+  takeSnapshot(`Before removing the “${rules.wheelTitle(wheel)}” wheel`);
   state.wheels = state.wheels.filter((w) => w.id !== id);
   if (state.activeWheelId === id) state.activeWheelId = state.wheels[0]?.id ?? null;
   save();
 }
 
 export function moveWheel(id, delta) {
-  moveItem(state.wheels, id, delta);
+  const i = state.wheels.findIndex((w) => w.id === id);
+  const j = i + delta;
+  if (i < 0 || j < 0 || j >= state.wheels.length) return;
+  [state.wheels[i], state.wheels[j]] = [state.wheels[j], state.wheels[i]];
   save();
 }
 
-/** Title, theme, removeAfterSpin or spinsPerDay. */
-export function setWheelProps(wheel, patch) {
-  const turningRemovalOn = patch.removeAfterSpin === true && !wheel.removeAfterSpin;
-  Object.assign(wheel, patch);
-  if (turningRemovalOn) {
-    // Anything already spun comes off the wheel.
-    for (const progress of allProgress(wheel)) {
-      const spun = new Set(progress.history.map((h) => h.optionId));
-      progress.remaining = wheel.options.filter((o) => !spun.has(o.id)).map((o) => o.id);
-    }
-  }
-  // Typing the title saves after a pause; everything else saves right away.
-  if (Object.keys(patch).every((k) => k === 'title')) scheduleSave();
+// ================================================================ Changing a wheel
+
+/**
+ * Apply a named rules action (see rules.js) to a wheel. Local wheels save here; online wheels
+ * update their copy now and send the change to the server. `soon` delays both, for typing.
+ * Returns what the action returns. Throws rules.RuleError if the action is refused.
+ */
+export function act(wheel, name, args = {}, { soon = false } = {}) {
+  const result = rules.applyAction(wheel, name, args);
+  if (wheel.online) sendOnline(wheel, name, args, { soon }).catch(() => {}); // the connection reports problems
+  if (soon) scheduleSave();
   else save();
+  return result;
 }
 
-/** How many more options this wheel can take. */
-export const optionRoom = (wheel) => MAX_OPTIONS - wheel.options.length;
+/** The online connection registers how to send a change to the server. */
+export function setOnlineSender(send) {
+  sendOnline = send;
+}
+
+/** Title, theme and rules. */
+export function setWheelProps(wheel, patch) {
+  // Typing the title waits for a pause; everything else saves right away.
+  act(wheel, 'set-props', patch, { soon: Object.keys(patch).every((k) => k === 'title') });
+}
 
 /** Add options (as many as fit). Returns the ones added. */
 export function addOptions(wheel, labels) {
-  const added = labels.slice(0, optionRoom(wheel)).map((label) => ({ id: uid(), label: text(label, MAX_LABEL_LENGTH), surprise: '' }));
-  wheel.options.push(...added);
-  for (const progress of allProgress(wheel)) progress.remaining.push(...added.map((o) => o.id));
-  save();
-  return added;
+  const options = labels.slice(0, rules.optionRoom(wheel)).map((label) => ({ id: uid(), label }));
+  return options.length ? act(wheel, 'add-options', { options }) : [];
 }
 
 export function updateOption(wheel, optionId, patch) {
-  const option = wheel.options.find((o) => o.id === optionId);
-  if (option) {
-    Object.assign(option, patch);
-    scheduleSave(); // called while typing
-  }
+  act(wheel, 'update-option', { id: optionId, ...patch }, { soon: true }); // called while typing
 }
 
 export function removeOption(wheel, optionId) {
-  wheel.options = wheel.options.filter((o) => o.id !== optionId);
-  for (const progress of allProgress(wheel)) progress.remaining = progress.remaining.filter((id) => id !== optionId);
-  save();
+  act(wheel, 'remove-option', { id: optionId });
 }
 
 /** Replace a wheel's options and rules with a preset, and start everyone's progress over. */
 export function loadPreset(wheel, presetId) {
-  takeSnapshot(`Before loading a preset on “${wheelTitle(wheel)}”`);
+  snapshotFirst(wheel, `Before loading a preset on “${rules.wheelTitle(wheel)}”`);
   const base = wheelFromPreset(presetId);
-  Object.assign(wheel, { options: base.options, removeAfterSpin: base.removeAfterSpin, spinsPerDay: base.spinsPerDay });
-  for (const progress of allProgress(wheel)) Object.assign(progress, freshProgress(wheel));
-  save();
+  act(wheel, 'replace-options', {
+    options: base.options.map(({ id, label }) => ({ id, label })),
+    removeAfterSpin: base.removeAfterSpin,
+    spinsPerDay: base.spinsPerDay,
+  });
 }
 
 /** Drop never-spun options left with an empty label (called when settings close). */
 export function pruneBlankOptions() {
-  let changed = false;
   for (const wheel of state.wheels) {
-    const spun = new Set(allProgress(wheel).flatMap((p) => p.history.map((h) => h.optionId)));
-    const blank = new Set(wheel.options.filter((o) => !o.label.trim() && !spun.has(o.id)).map((o) => o.id));
-    if (!blank.size) continue;
-    wheel.options = wheel.options.filter((o) => !blank.has(o.id));
-    for (const progress of allProgress(wheel)) progress.remaining = progress.remaining.filter((id) => !blank.has(id));
-    changed = true;
+    if (!canManage(wheel)) continue;
+    const spun = new Set(wheel.spins.map((s) => s.optionId));
+    for (const option of wheel.options.filter((o) => !o.label.trim() && !spun.has(o.id))) {
+      act(wheel, 'remove-option', { id: option.id });
+    }
   }
-  if (changed) save();
+}
+
+/** Snapshots cover wheels on this device; an online wheel's history lives on the server. */
+function snapshotFirst(wheel, reason) {
+  if (!wheel.online) takeSnapshot(reason);
 }
 
 // ================================================================ Players (on a wheel)
 
-export const canAddPlayer = (wheel) => wheel.players.length < MAX_PLAYERS;
+export const canAddPlayer = (wheel) => wheel.players.length < rules.MAX_PLAYERS;
 
 /**
- * Add a player. A shared wheel's spins belong to nobody in particular, so when its first
- * player is added the shared progress is cleared (after a snapshot) rather than kept hidden.
+ * Add a player. On this device a wheel without players is shared, and its spins belong to
+ * nobody in particular, so adding the first player clears them (after a snapshot) rather
+ * than keeping them hidden. Online wheels keep their kind; this just adds a name to claim.
  */
 export function addPlayer(wheel, name) {
-  if (!canAddPlayer(wheel)) throw new Error(`A wheel can have up to ${MAX_PLAYERS} players.`);
-  if (isShared(wheel) && wheel.shared.history.length) {
-    takeSnapshot(`Before adding the first player to “${wheelTitle(wheel)}”`);
+  if (!wheel.online && wheel.sharedWheel) {
+    if (wheel.spins.length) takeSnapshot(`Before adding the first player to “${rules.wheelTitle(wheel)}”`);
+    act(wheel, 'reset', { playerId: null });
+    act(wheel, 'set-props', { sharedWheel: false });
   }
-  if (isShared(wheel)) Object.assign(wheel.shared, freshProgress(wheel));
-  const player = { id: uid(), name: text(name, MAX_NAME_LENGTH), ...freshProgress(wheel) };
-  wheel.players.push(player);
+  const player = act(wheel, 'add-player', { id: uid(), name });
   wheel.activePlayerId = player.id;
   save();
   return player;
 }
 
 export function renamePlayer(wheel, id, name) {
-  const player = wheel.players.find((p) => p.id === id);
-  if (player) {
-    player.name = text(name, MAX_NAME_LENGTH);
-    scheduleSave(); // called while typing
-  }
+  act(wheel, 'rename-player', { id, name }, { soon: true }); // called while typing
 }
 
 export function removePlayer(wheel, id) {
-  const player = wheel.players.find((p) => p.id === id);
+  const player = rules.findPlayer(wheel, id);
   if (!player) return;
-  takeSnapshot(`Before removing ${displayName(player)} from “${wheelTitle(wheel)}”`);
-  wheel.players = wheel.players.filter((p) => p.id !== id);
+  snapshotFirst(wheel, `Before removing ${displayName(player)} from “${rules.wheelTitle(wheel)}”`);
+  act(wheel, 'remove-player', { id });
   if (wheel.activePlayerId === id) wheel.activePlayerId = wheel.players[0]?.id ?? null;
-  if (isShared(wheel)) Object.assign(wheel.shared, freshProgress(wheel)); // now shared: start fresh
+  if (!wheel.online && !wheel.players.length) {
+    act(wheel, 'reset', { playerId: null }); // now shared: start fresh
+    act(wheel, 'set-props', { sharedWheel: true });
+  }
   save();
 }
 
 export function movePlayer(wheel, id, delta) {
-  moveItem(wheel.players, id, delta);
-  save();
+  act(wheel, 'move-player', { id, delta });
 }
 
 export function setActivePlayer(wheel, id) {
@@ -692,84 +588,91 @@ export function setActivePlayer(wheel, id) {
   }
 }
 
-function moveItem(list, id, delta) {
-  const i = list.findIndex((x) => x.id === id);
-  const j = i + delta;
-  if (i < 0 || j < 0 || j >= list.length) return;
-  [list[i], list[j]] = [list[j], list[i]];
+// ================================================================ Spinning & progress
+
+/** Spin a wheel on this device: pick, save, and return { spin, option, index }. */
+export function spinLocal(wheel, playerId) {
+  const result = rules.applySpin(wheel, playerId);
+  save(); // saved before the wheel moves, so refreshing mid-spin can't re-roll
+  return result;
 }
 
-// ================================================================ Spinning
-// `progress` is a player on the wheel, or wheel.shared for a wheel without players.
-
-export function spinsToday(progress, today = todayKey()) {
-  return progress.history.filter((h) => h.date === today).length;
+export function undoLastSpin(wheel, playerId) {
+  const last = rules.spinsFor(wheel, playerId ?? null).at(-1);
+  return last ? act(wheel, 'undo', { playerId, spinId: last.id }) : null;
 }
 
-/** Extra spins a grown-up granted for today. */
-export function bonusToday(progress, today = todayKey()) {
-  return progress.bonus?.date === today ? progress.bonus.count : 0;
+export function allowExtraSpin(wheel, playerId) {
+  act(wheel, 'extra-spin', { playerId });
 }
 
-/** Spins left today, or Infinity when the wheel has no daily limit. */
-export function spinsLeftToday(wheel, progress, today = todayKey()) {
-  if (!wheel.spinsPerDay) return Infinity;
-  return Math.max(0, wheel.spinsPerDay + bonusToday(progress, today) - spinsToday(progress, today));
+export function resetProgress(wheel, playerId) {
+  const player = rules.findPlayer(wheel, playerId);
+  const who = wheel.sharedWheel || !player ? `“${rules.wheelTitle(wheel)}”` : `${displayName(player)} on “${rules.wheelTitle(wheel)}”`;
+  snapshotFirst(wheel, `Before resetting ${who}`);
+  act(wheel, 'reset', { playerId });
 }
 
-/** Options currently on the wheel for this progress. */
-export function spinPool(wheel, progress) {
-  if (!wheel.removeAfterSpin) return wheel.options;
-  const remaining = new Set(progress.remaining);
-  return wheel.options.filter((o) => remaining.has(o.id));
+// ================================================================ Online wheels
+
+/**
+ * Add (or refresh) an online wheel on this device from the server's copy, and make it active.
+ * If this device already has the same online wheel, that entry is updated instead.
+ */
+export function addOnlineWheel(serverWheel, online) {
+  const existing = state.wheels.find((w) => w.online?.wheelId === online.wheelId);
+  const ids = new Set(state.wheels.filter((w) => w !== existing).map((w) => w.id));
+  const wheel = normalizeDeviceWheel({ ...serverWheel, id: existing?.id ?? uid(), online }, ids, state.settings.theme);
+  if (existing) Object.assign(clearWheel(existing), wheel);
+  else {
+    if (!canAddWheel()) throw new Error(`You can have up to ${MAX_WHEELS} wheels.`);
+    state.wheels.push(wheel);
+  }
+  state.activeWheelId = (existing ?? wheel).id;
+  save();
+  return existing ?? wheel;
 }
 
 /**
- * Options that have been spun and are now off the wheel, each with its latest history entry.
- * Only counts options that still exist (an option can be deleted after it was spun).
+ * Replace an online wheel's copy with the server's, in place (screens keep their reference).
+ * `meta` carries the host-only details (join code, joining open, last activity).
  */
-export function openedOptions(wheel, progress) {
-  const onWheel = new Set(spinPool(wheel, progress).map((o) => o.id));
-  const exists = new Set(wheel.options.map((o) => o.id));
-  const opened = new Map();
-  for (const entry of progress.history) {
-    if (exists.has(entry.optionId) && !onWheel.has(entry.optionId)) opened.set(entry.optionId, entry);
+export function applyServerWheel(wheel, serverWheel, meta = {}) {
+  const fresh = normalizeDeviceWheel(
+    { ...serverWheel, id: wheel.id, activePlayerId: wheel.activePlayerId, online: { ...wheel.online, ...pick(meta, ['joinCode', 'joinOpen', 'lastActiveAt']) } },
+    new Set(),
+    state.settings.theme,
+  );
+  Object.assign(clearWheel(wheel), fresh);
+  // If another tab saved meanwhile, don't write over it: this page reloads from storage soon
+  // (main.js), and the server sends its copy again when it reconnects.
+  if (!storageChangedElsewhere()) save();
+}
+
+/** Forget this device's sign-in to an online wheel (keeps the last-known copy). */
+export function signOut(wheel) {
+  if (!wheel.online) return;
+  wheel.online.token = '';
+  save();
+}
+
+/** Turn an online wheel back into one on this device (after it was deleted from the server). */
+export function makeLocal(wheel) {
+  delete wheel.online;
+  // On one device a shared wheel has no players, so its spins become nobody's in particular.
+  if (wheel.sharedWheel || !wheel.players.length) {
+    wheel.players = [];
+    wheel.activePlayerId = null;
+    wheel.spins = wheel.spins.map((s) => ({ ...s, playerId: null }));
+    wheel.bonusSpins = wheel.bonusSpins.map((b) => ({ ...b, playerId: null }));
+    wheel.sharedWheel = true;
   }
-  return opened;
-}
-
-/** { ok: true } or { ok: false, reason: 'empty' | 'done' | 'locked' } */
-export function spinStatus(wheel, progress) {
-  if (!wheel.options.length) return { ok: false, reason: 'empty' };
-  if (!spinPool(wheel, progress).length) return { ok: false, reason: 'done' };
-  if (spinsLeftToday(wheel, progress) === 0) return { ok: false, reason: 'locked' };
-  return { ok: true };
-}
-
-export function recordSpin(wheel, progress, option) {
-  progress.history.push({ optionId: option.id, label: option.label, date: todayKey(), at: new Date().toISOString() });
-  if (wheel.removeAfterSpin) progress.remaining = progress.remaining.filter((id) => id !== option.id);
-  return save();
-}
-
-export function undoLastSpin(wheel, progress) {
-  const last = progress.history.pop();
-  if (!last) return null;
-  const stillExists = wheel.options.some((o) => o.id === last.optionId);
-  if (stillExists && !progress.remaining.includes(last.optionId)) progress.remaining.push(last.optionId);
-  save();
-  return last;
-}
-
-export function allowExtraSpin(progress) {
-  const today = todayKey();
-  progress.bonus = { date: today, count: bonusToday(progress, today) + 1 };
   save();
 }
 
-export function resetProgress(wheel, progress) {
-  const who = progress === wheel.shared ? `“${wheelTitle(wheel)}”` : `${displayName(progress)} on “${wheelTitle(wheel)}”`;
-  takeSnapshot(`Before resetting ${who}`);
-  Object.assign(progress, freshProgress(wheel));
-  save();
+function clearWheel(wheel) {
+  for (const key of Object.keys(wheel)) delete wheel[key];
+  return wheel;
 }
+
+const pick = (obj, keys) => Object.fromEntries(keys.filter((k) => obj?.[k] !== undefined).map((k) => [k, obj[k]]));

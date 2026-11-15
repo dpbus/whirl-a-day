@@ -13,7 +13,7 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Whirl-a-Day">
   <!-- Only this site's own files may load. No inline scripts or style attributes. -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; media-src 'self'; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self' wss://whirladay.com; media-src 'self'; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
   <meta name="referrer" content="no-referrer">
   <link rel="stylesheet" href="css/fonts.css">
   <link rel="stylesheet" href="css/styles.css">
@@ -33,6 +33,7 @@
     </header>
 
     <p id="storage-warning" class="banner" role="alert" hidden></p>
+    <p id="online-status" class="banner online-status" role="status" hidden></p>
 
     <div id="players" class="tabs" role="group" aria-label="Players"></div>
 
@@ -92,6 +93,7 @@
     </div>
   </dialog>
 
+  <p id="toast" class="toast" role="status" aria-live="polite" hidden></p>
   <canvas id="confetti" aria-hidden="true"></canvas>
 </body>
 </html>

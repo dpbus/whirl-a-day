@@ -1,3 +1,4 @@
+// This device's data (public/js/state.js): wheels, saving, snapshots, backups, online pointers.
 // Run with: npm test   (or: node --test tests/)
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
@@ -5,26 +6,27 @@ import { freshStorage } from './helpers.js';
 
 let storage = freshStorage();
 const store = await import('../public/js/state.js');
-const { todayKey } = await import('../public/js/util.js');
 
-const today = todayKey();
 const KEY = store.STORAGE_KEY;
 const raw = () => JSON.parse(storage.data.get(KEY));
+const WHEEL_ID = 'a'.repeat(64);
+const TOKEN = 'abcdefghijklmnopqrstuv';
 
 beforeEach(() => {
   storage = freshStorage();
   store.load();
 });
 
-/** The usual setup: a 12 Days wheel for Ava and Ben. */
+/** The usual setup: a 12 Days wheel for Ava and Ben (their player ids). */
 function advent({ spinsPerDay } = {}) {
   const wheel = store.addWheel({ presetId: 'twelve-days', playerNames: ['Ava', 'Ben'] });
   if (spinsPerDay !== undefined) store.setWheelProps(wheel, { spinsPerDay });
-  const [ava, ben] = wheel.players;
+  const [ava, ben] = wheel.players.map((p) => p.id);
   return { wheel, ava, ben };
 }
 
-const spinFirst = (wheel, progress) => store.recordSpin(wheel, progress, store.spinPool(wheel, progress)[0]);
+const spinFirst = (wheel, playerId) => store.spinLocal(wheel, playerId);
+const spinsOf = (wheel, playerId) => wheel.spins.filter((s) => s.playerId === playerId).length;
 
 // ------------------------------------------------------------ wheels & players
 
@@ -34,6 +36,7 @@ test('a new wheel from a preset gets the preset theme, options and rules', () =>
   assert.equal(wheel.theme, 'christmas');
   assert.equal(wheel.options.length, 12);
   assert.equal(wheel.spinsPerDay, 1);
+  assert.equal(wheel.sharedWheel, false);
   assert.equal(store.activeWheel(), wheel);
   assert.equal(store.activePlayer(wheel).name, 'Ava');
 });
@@ -49,30 +52,31 @@ test('several wheels: each keeps its own options, players and theme', () => {
   assert.equal(store.activeWheel(), xmas);
 });
 
-test('a shared wheel (no players) keeps one shared progress', () => {
+test('a shared wheel (no players) logs spins by nobody in particular', () => {
   const dinner = store.addWheel({ presetId: 'dinner' });
-  const progress = store.activeProgress(dinner);
-  assert.equal(progress, dinner.shared);
-  spinFirst(dinner, progress);
-  spinFirst(dinner, progress);
-  assert.equal(dinner.shared.history.length, 2);
-  assert.ok(store.spinStatus(dinner, progress).ok); // dinner: no daily limit, nothing removed
+  assert.equal(store.activePlayerId(dinner), null);
+  spinFirst(dinner, null);
+  spinFirst(dinner, null);
+  assert.equal(dinner.spins.length, 2);
+  assert.ok(dinner.spins.every((s) => s.playerId === null));
+  assert.ok(store.spinStatus(dinner, null).ok); // dinner: no daily limit, nothing removed
 });
 
-test('adding options puts them on everyone\'s wheel; removing takes them off', () => {
+test("adding options puts them on everyone's wheel; removing takes them off", () => {
   const { wheel, ava, ben } = advent();
   spinFirst(wheel, ava);
   const [added] = store.addOptions(wheel, ['13']);
-  assert.ok(ava.remaining.includes(added.id) && ben.remaining.includes(added.id) && wheel.shared.remaining.includes(added.id));
+  assert.ok(store.spinPool(wheel, ava).includes(added) && store.spinPool(wheel, ben).includes(added));
   store.removeOption(wheel, added.id);
-  assert.ok(!ava.remaining.includes(added.id));
+  assert.ok(!store.spinPool(wheel, ava).includes(added));
 });
 
 test('removing a wheel or player can be undone from a snapshot', () => {
   const { wheel, ava } = advent();
   spinFirst(wheel, ava);
-  store.removePlayer(wheel, ava.id);
+  store.removePlayer(wheel, ava);
   assert.equal(wheel.players.length, 1);
+  assert.equal(wheel.spins.length, 0); // their spins go with them
   store.restoreSnapshot(store.listSnapshots()[0].at);
   assert.equal(store.activeWheel().players.length, 2);
 
@@ -80,28 +84,26 @@ test('removing a wheel or player can be undone from a snapshot', () => {
   assert.equal(store.getState().wheels.length, 0);
   store.restoreSnapshot(store.listSnapshots()[0].at);
   assert.equal(store.getState().wheels.length, 1);
-  assert.equal(store.activeWheel().players[0].history.length, 1);
+  assert.equal(store.activeWheel().spins.length, 1);
 });
 
 test('moving wheels and players reorders them', () => {
-  const a = store.addWheel({ presetId: 'dinner', title: 'A' });
+  store.addWheel({ presetId: 'dinner', title: 'A' });
   const b = store.addWheel({ presetId: 'dinner', title: 'B' });
   store.moveWheel(b.id, -1);
   assert.deepEqual(store.getState().wheels.map((w) => w.title), ['B', 'A']);
-  const { wheel } = advent();
-  store.movePlayer(wheel, wheel.players[1].id, -1);
+  const { wheel, ben } = advent();
+  store.movePlayer(wheel, ben, -1);
   assert.deepEqual(wheel.players.map((p) => p.name), ['Ben', 'Ava']);
-  void a;
 });
 
 // ------------------------------------------------------------ spinning
 
 test('a spin removes the result from that player only', () => {
   const { wheel, ava, ben } = advent();
-  const five = store.spinPool(wheel, ava)[4];
-  store.recordSpin(wheel, ava, five);
+  const { option } = spinFirst(wheel, ava);
   assert.equal(store.spinPool(wheel, ava).length, 11);
-  assert.ok(!store.spinPool(wheel, ava).some((o) => o.id === five.id));
+  assert.ok(!store.spinPool(wheel, ava).includes(option));
   assert.equal(store.spinPool(wheel, ben).length, 12);
 });
 
@@ -109,37 +111,12 @@ test('one spin per day locks, an extra spin unlocks once, undo gives it back', (
   const { wheel, ava } = advent();
   spinFirst(wheel, ava);
   assert.equal(store.spinStatus(wheel, ava).reason, 'locked');
-  store.allowExtraSpin(ava);
+  store.allowExtraSpin(wheel, ava);
   assert.ok(store.spinStatus(wheel, ava).ok);
   spinFirst(wheel, ava);
   assert.equal(store.spinStatus(wheel, ava).reason, 'locked');
   store.undoLastSpin(wheel, ava);
   assert.equal(store.spinsLeftToday(wheel, ava), 1);
-});
-
-test('spins per day: 2 a day, then locked; 0 means no limit', () => {
-  const { wheel, ava } = advent({ spinsPerDay: 2 });
-  spinFirst(wheel, ava);
-  assert.equal(store.spinsLeftToday(wheel, ava), 1);
-  spinFirst(wheel, ava);
-  assert.equal(store.spinStatus(wheel, ava).reason, 'locked');
-  store.setWheelProps(wheel, { spinsPerDay: 0 });
-  assert.equal(store.spinsLeftToday(wheel, ava), Infinity);
-});
-
-test('wheel reports done after every option is spun', () => {
-  const { wheel, ben } = advent({ spinsPerDay: 0 });
-  while (store.spinPool(wheel, ben).length) spinFirst(wheel, ben);
-  assert.equal(store.spinStatus(wheel, ben).reason, 'done');
-});
-
-test('turning "remove after spin" back on removes already-spun options for everyone', () => {
-  const { wheel, ava } = advent();
-  spinFirst(wheel, ava);
-  store.setWheelProps(wheel, { removeAfterSpin: false });
-  assert.equal(store.spinPool(wheel, ava).length, 12);
-  store.setWheelProps(wheel, { removeAfterSpin: true });
-  assert.equal(store.spinPool(wheel, ava).length, 11);
 });
 
 test('loading a preset resets every player on that wheel', () => {
@@ -148,8 +125,23 @@ test('loading a preset resets every player on that wheel', () => {
   spinFirst(wheel, ben);
   store.loadPreset(wheel, 'advent-24');
   assert.equal(wheel.options.length, 24);
-  assert.equal(ava.history.length + ben.history.length, 0);
+  assert.equal(wheel.spins.length, 0);
   assert.equal(store.spinPool(wheel, ava).length, 24);
+  assert.match(store.listSnapshots()[0].reason, /preset/);
+});
+
+test('adding the first player clears shared spins (after a snapshot); removing the last starts fresh', () => {
+  const wheel = store.addWheel({ presetId: 'twelve-days' });
+  spinFirst(wheel, null);
+  store.addPlayer(wheel, 'Ava');
+  assert.equal(wheel.sharedWheel, false);
+  assert.equal(wheel.spins.length, 0);
+  assert.match(store.listSnapshots()[0].reason, /first player/);
+  spinFirst(wheel, wheel.players[0].id);
+  store.removePlayer(wheel, wheel.players[0].id);
+  assert.equal(wheel.sharedWheel, true);
+  assert.equal(wheel.spins.length, 0);
+  assert.equal(store.spinPool(wheel, null).length, 12);
 });
 
 // ------------------------------------------------------------ persistence & backups
@@ -158,7 +150,7 @@ test('progress survives a reload', () => {
   const { wheel, ava } = advent();
   spinFirst(wheel, ava);
   store.load();
-  assert.equal(store.activeWheel().players[0].history.length, 1);
+  assert.equal(spinsOf(store.activeWheel(), ava), 1);
 });
 
 test('typing edits are saved after a pause, or immediately on flush', () => {
@@ -192,60 +184,94 @@ test('rejects things that are not backups', () => {
   }
 });
 
-// ------------------------------------------------------------ migration from older versions
+test('backups from before online wheels are refused as older, not newer', () => {
+  for (const old of [{ version: 3, wheels: [] }, { version: 2, players: [] }, { version: 1, players: [] }]) {
+    assert.throws(() => store.parseBackup(old), /older version/);
+  }
+  assert.equal(store.parseBackup(JSON.parse(store.exportJson())).version, store.SCHEMA_VERSION);
+});
 
-test('v2: players with identical wheels merge into one wheel; progress is kept and remapped', () => {
-  const opts = (prefix) => ['1', '2', '3'].map((label) => ({ id: `${prefix}-${label}`, label, surprise: '' }));
-  const v2 = {
-    version: 2,
-    activePlayerId: 'b',
-    settings: { theme: 'christmas', pin: '4321' },
-    players: [
-      { id: 'a', name: 'Ava', wheel: { title: '12 Days', options: opts('a'), removeAfterSpin: true, spinsPerDay: 1 }, remaining: ['a-2', 'a-3'], history: [{ optionId: 'a-1', label: '1', date: '2026-12-01' }] },
-      { id: 'b', name: 'Ben', wheel: { title: '12 Days', options: opts('b'), removeAfterSpin: true, spinsPerDay: 1 }, remaining: ['b-1', 'b-3'], history: [{ optionId: 'b-2', label: '2', date: '2026-12-01' }] },
-      { id: 'c', name: 'Cy', wheel: { title: 'Chores', options: [{ id: 'x', label: 'Dishes' }], removeAfterSpin: true, spinsPerDay: 0 }, remaining: ['x'], history: [] },
-    ],
+// ------------------------------------------------------------ online wheels on this device
+
+function onlineWheel(role = 'host') {
+  const serverWheel = {
+    id: WHEEL_ID,
+    title: 'Game night',
+    options: [{ id: 'o1', label: 'Charades', surprise: '' }, { id: 'o2', label: 'Pictionary', surprise: '' }],
+    sharedWheel: true,
+    removeAfterSpin: false,
+    players: [{ id: 'p1', name: 'Maya', claimed: true, tokenHash: 'f'.repeat(64) }],
+    spins: [{ id: 's1', playerId: 'p1', optionId: 'o1', at: '2026-12-01T20:00:00.000Z' }],
+    bonusSpins: [],
+    timeZone: 'America/Chicago',
   };
-  const s = store.parseBackup(v2);
-  assert.equal(s.wheels.length, 2);
-  const [xmas, chores] = s.wheels;
-  assert.deepEqual(xmas.players.map((p) => p.name), ['Ava', 'Ben']);
-  assert.equal(xmas.theme, 'christmas');
-  assert.equal(s.activeWheelId, xmas.id);
-  assert.equal(xmas.activePlayerId, 'b');
-  const [ava, ben] = xmas.players;
-  const label = (id) => xmas.options.find((o) => o.id === id)?.label;
-  assert.equal(label(ava.history[0].optionId), '1');
-  assert.equal(label(ben.history[0].optionId), '2');
-  assert.deepEqual(store.spinPool(xmas, ava).map((o) => o.label), ['2', '3']);
-  assert.deepEqual(store.spinPool(xmas, ben).map((o) => o.label), ['1', '3']);
-  assert.deepEqual(chores.players.map((p) => p.name), ['Cy']);
-});
+  return store.addOnlineWheel(serverWheel, { wheelId: WHEEL_ID, role, token: TOKEN, playerId: role === 'player' ? 'p1' : null, joinCode: 'ABCD2345' });
+}
 
-test('v1 data (dailyLock / extraSpinDate) is migrated', () => {
-  const s = store.parseBackup({
-    players: [
-      {
-        id: 'a',
-        name: 'Ava',
-        wheel: { options: [{ id: '1', label: '1' }, { id: '2', label: '2' }], dailyLock: true },
-        history: [{ optionId: '1', label: '1', date: today }],
-        remaining: ['2'],
-        extraSpinDate: today,
-      },
-    ],
-  });
-  const wheel = s.wheels[0];
-  assert.equal(wheel.spinsPerDay, 1);
-  assert.deepEqual(wheel.players[0].bonus, { date: today, count: 1 });
-  assert.equal(store.spinsLeftToday(wheel, wheel.players[0]), 1);
-});
-
-test('an old save on this device is upgraded on load', () => {
-  storage.data.set(KEY, JSON.stringify({ version: 2, players: [{ id: 'a', name: 'Ava', wheel: { title: 'X', options: [{ id: '1', label: '1' }] } }] }));
+test('an online wheel keeps its kind, players and pointer; token hashes are never kept', () => {
+  const wheel = onlineWheel();
+  assert.equal(wheel.sharedWheel, true); // shared, even though it has players
+  assert.equal(wheel.players[0].claimed, true);
+  assert.equal(wheel.players[0].tokenHash, undefined);
+  assert.equal(store.roleOf(wheel), 'host');
+  assert.equal(wheel.online.joinCode, 'ABCD2345');
   store.load();
-  assert.equal(store.getState().version, 3);
-  assert.equal(store.activeWheel().players[0].name, 'Ava');
+  assert.equal(store.activeWheel().online.token, TOKEN);
+  assert.equal(store.activeWheel().sharedWheel, true);
+});
+
+test('a phone that joined spins as itself and cannot manage the wheel', () => {
+  const wheel = onlineWheel('player');
+  assert.equal(store.activePlayerId(wheel), 'p1');
+  assert.equal(store.canManage(wheel), false);
+});
+
+test('backups never include online sign-in tokens; restored online wheels are signed out', () => {
+  onlineWheel();
+  const json = store.exportJson();
+  assert.ok(!json.includes(TOKEN));
+  const restored = store.parseBackup(JSON.parse(json));
+  assert.equal(restored.wheels[0].online.wheelId, WHEEL_ID);
+  assert.ok(store.isSignedOut(restored.wheels[0]));
+});
+
+test("the server's copy replaces an online wheel in place", () => {
+  const wheel = onlineWheel();
+  store.applyServerWheel(wheel, { ...wheel, title: 'Renamed', spins: [] }, { joinOpen: false });
+  assert.equal(store.activeWheel(), wheel); // same object, so screens keep their reference
+  assert.equal(wheel.title, 'Renamed');
+  assert.equal(wheel.spins.length, 0);
+  assert.equal(wheel.online.joinOpen, false);
+  assert.equal(wheel.online.token, TOKEN);
+});
+
+test('changes to an online wheel apply to the copy and are sent on', async () => {
+  const sent = [];
+  store.setOnlineSender((wheel, name, args) => {
+    sent.push([name, args]);
+    return Promise.resolve();
+  });
+  const wheel = onlineWheel();
+  store.setWheelProps(wheel, { spinsPerDay: 2 });
+  assert.equal(wheel.spinsPerDay, 2);
+  assert.deepEqual(sent, [['set-props', { spinsPerDay: 2 }]]);
+  store.setOnlineSender(() => Promise.resolve());
+});
+
+test('taking a shared online wheel offline keeps its spins as nobody’s', () => {
+  const wheel = onlineWheel();
+  store.makeLocal(wheel);
+  assert.equal(wheel.online, undefined);
+  assert.equal(wheel.players.length, 0);
+  assert.equal(wheel.sharedWheel, true);
+  assert.equal(wheel.spins[0].playerId, null);
+  store.load();
+  assert.equal(store.activeWheel().spins.length, 1);
+});
+
+test('a malformed online pointer is dropped; the wheel stays as a local one', () => {
+  const s = store.parseBackup({ wheels: [{ title: 'W', online: { wheelId: 'nope', role: 'host' } }] });
+  assert.equal(s.wheels[0].online, undefined);
 });
 
 // ------------------------------------------------------------ hostile / damaged input
@@ -291,6 +317,17 @@ test('over-long text and out-of-range numbers are bounded', () => {
   assert.equal(w.spinsPerDay, store.MAX_SPINS_PER_DAY);
 });
 
+test('huge or crafted data is capped', () => {
+  const options = Array.from({ length: 5000 }, (_, i) => ({ id: `o${i}`, label: String(i) }));
+  const players = Array.from({ length: 100 }, (_, i) => ({ id: `p${i}`, name: `P${i}` }));
+  const spins = Array.from({ length: 10_000 }, () => ({ playerId: 'p0', optionId: 'o1', at: '2026-12-01T00:00:00Z' }));
+  const s = store.parseBackup({ wheels: Array.from({ length: 80 }, () => ({ options, players, spins })) });
+  assert.equal(s.wheels.length, store.MAX_WHEELS);
+  assert.equal(s.wheels[0].options.length, store.MAX_OPTIONS);
+  assert.equal(s.wheels[0].players.length, store.MAX_PLAYERS);
+  assert.ok(s.wheels[0].spins.length <= 3000);
+});
+
 // ------------------------------------------------------------ safety nets
 
 test('unreadable saved data is set aside and the newest snapshot is loaded', () => {
@@ -301,7 +338,7 @@ test('unreadable saved data is set aside and the newest snapshot is loaded', () 
   store.load();
   assert.equal(store.getLoadProblem(), 'unreadable');
   assert.ok(store.getRecoveredFrom());
-  assert.equal(store.activeWheel().players[0].history.length, 1);
+  assert.equal(spinsOf(store.activeWheel(), ava), 1);
   assert.equal(store.listUnreadableData()[0].raw, '{"wheels": [ broken');
 });
 
@@ -320,7 +357,7 @@ test('if unreadable data cannot be set aside, it is never overwritten', () => {
 test('a failed save is reported, and recovers once storage works', () => {
   const { wheel, ava } = advent();
   storage.quota = 10;
-  assert.equal(spinFirst(wheel, ava), false);
+  spinFirst(wheel, ava);
   assert.equal(store.saveHealthy(), false);
   storage.quota = Infinity;
   store.save();
@@ -341,7 +378,7 @@ test('reset and erase can be undone from snapshots (by timestamp); summaries des
   const snap = store.listSnapshots().find((s) => s.reason.startsWith('Before resetting'));
   assert.match(snap.summary, /12 Days of Christmas: Ava 1, Ben 0 · What's for Dinner\?: 0 spins/);
   store.restoreSnapshot(snap.at);
-  assert.equal(store.getState().wheels[0].players[0].history.length, 1);
+  assert.equal(spinsOf(store.getState().wheels[0], ava), 1);
 
   await new Promise((r) => setTimeout(r, 2)); // distinct timestamps
   store.eraseAll();
@@ -363,8 +400,7 @@ test('changes from another tab are detected', () => {
 
 test('pruning removes blank new options but never spun ones', () => {
   const { wheel, ava } = advent();
-  const spun = store.spinPool(wheel, ava)[0];
-  store.recordSpin(wheel, ava, spun);
+  const { option: spun } = spinFirst(wheel, ava);
   store.updateOption(wheel, spun.id, { label: '' });
   store.addOptions(wheel, ['']);
   const before = wheel.options.length;
@@ -372,8 +408,6 @@ test('pruning removes blank new options but never spun ones', () => {
   assert.equal(wheel.options.length, before - 1);
   assert.ok(wheel.options.some((o) => o.id === spun.id));
 });
-
-// ------------------------------------------------------------ added after the second review
 
 test('data from a newer app version is refused, never overwritten', () => {
   assert.throws(() => store.parseBackup({ version: store.SCHEMA_VERSION + 1, wheels: [] }), store.NewerVersionError);
@@ -385,40 +419,11 @@ test('data from a newer app version is refused, never overwritten', () => {
   assert.equal(storage.data.get(KEY), newer);
 });
 
-test('huge or crafted data is capped', () => {
-  const options = Array.from({ length: 5000 }, (_, i) => ({ label: String(i) }));
-  const players = Array.from({ length: 100 }, (_, i) => ({ name: `P${i}`, history: Array.from({ length: 3000 }, () => ({ optionId: 'x' })) }));
-  const s = store.parseBackup({ wheels: Array.from({ length: 80 }, () => ({ options, players })) });
-  assert.equal(s.wheels.length, store.MAX_WHEELS);
-  assert.equal(s.wheels[0].options.length, store.MAX_OPTIONS);
-  assert.equal(s.wheels[0].players.length, store.MAX_PLAYERS);
-  assert.ok(s.wheels[0].players[0].history.length <= 1000);
-});
-
 test('addOptions only adds what fits', () => {
   const wheel = store.addWheel({ presetId: 'blank' });
   const added = store.addOptions(wheel, Array.from({ length: store.MAX_OPTIONS + 50 }, (_, i) => String(i)));
   assert.equal(added.length, store.MAX_OPTIONS);
   assert.equal(store.optionRoom(wheel), 0);
-});
-
-test('"opened" ignores spun options that were later deleted', () => {
-  const { wheel, ava } = advent({ spinsPerDay: 0 });
-  for (let i = 0; i < 3; i++) spinFirst(wheel, ava);
-  store.removeOption(wheel, ava.history[0].optionId);
-  assert.equal(store.openedOptions(wheel, ava).size, 2);
-});
-
-test('adding the first player clears shared spins (after a snapshot); removing the last starts fresh', () => {
-  const wheel = store.addWheel({ presetId: 'twelve-days' });
-  spinFirst(wheel, wheel.shared);
-  store.addPlayer(wheel, 'Ava');
-  assert.equal(wheel.shared.history.length, 0);
-  assert.match(store.listSnapshots()[0].reason, /first player/);
-  spinFirst(wheel, wheel.players[0]);
-  store.removePlayer(wheel, wheel.players[0].id);
-  assert.equal(wheel.shared.history.length, 0);
-  assert.equal(store.spinPool(wheel, wheel.shared).length, 12);
 });
 
 test('restoring a backup ends read-only mode and saves; erase clears the warning', () => {

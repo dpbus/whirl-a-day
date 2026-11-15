@@ -84,7 +84,10 @@ export function discardSettings() {
 }
 
 function showTab(tab, { keepScroll = false } = {}) {
-  if (TABS_NEEDING_A_WHEEL.has(tab) && !store.activeWheel()) tab = 'wheels';
+  // A phone that joined someone else's online wheel can't edit it, so those tabs are hidden.
+  const canManage = Boolean(store.activeWheel()) && store.canManage(store.activeWheel());
+  if (TABS_NEEDING_A_WHEEL.has(tab) && !canManage) tab = 'wheels';
+  for (const name of TABS_NEEDING_A_WHEEL) tabBar.querySelector(`[data-tab="${name}"]`).hidden = !canManage;
   const { body } = view;
   const scrollTop = body.scrollTop;
 
@@ -102,7 +105,7 @@ function showTab(tab, { keepScroll = false } = {}) {
 
 /** Arrow keys move between tabs, as screen-reader users expect from a tab list. */
 function moveBetweenTabs(event) {
-  const tabs = [...tabBar.querySelectorAll('[data-tab]')];
+  const tabs = [...tabBar.querySelectorAll('[data-tab]:not([hidden])')];
   const index = tabs.indexOf(document.activeElement);
   const step = { ArrowRight: 1, ArrowLeft: -1 }[event.key];
   if (index < 0 || !step) return;

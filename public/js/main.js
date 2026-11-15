@@ -1,7 +1,11 @@
 // Entry point: renders the main screen (the active wheel) and runs spins.
 //
 // Naming: `wheel` is always a wheel's data (from state.js); `wheelView` is the canvas that draws it.
+// A local wheel is spun right here. An online wheel is spun by the server, which tells every
+// connected phone (store/online.js); each spin then plays here through the same animation.
 import * as store from './state.js';
+import * as online from './store/online.js';
+import { dayKey } from './rules.js';
 import { applyTheme } from './themes.js';
 import { WheelView } from './wheel.js';
 import * as fx from './effects.js';
@@ -9,9 +13,11 @@ import { discardSettings, initSettings, openSettings, openWelcome } from './sett
 import { alertDialog } from './dialogs.js';
 import { icon, hydrateIcons } from './icons.js';
 import { wheelButton } from './templates.js';
-import { $, displayName, escapeHtml, formatDay, prefersReducedMotion, randomInt, todayKey } from './util.js';
+import { handleLinkInUrl, initOnlineUi, statusText } from './online-ui.js';
+import { $, displayName, escapeHtml, formatDay, prefersReducedMotion } from './util.js';
 
 const APP_NAME = 'Whirl-a-Day';
+const RESULT_MIN_MS = 2500; // with another spin queued, a result stays up at least this long
 
 const els = {
   title: $('#wheel-title'),
@@ -31,14 +37,19 @@ const els = {
   wheelsMenu: $('#wheels-dialog'),
   wheelsList: $('#wheels-menu-list'),
   warning: $('#storage-warning'),
+  onlineStatus: $('#online-status'),
+  toast: $('#toast'),
 };
 
 let wheelView;
 let theme; // the active theme object (colors, sounds, confetti)
 let themeId = null;
-let spinning = false;
+let spinning = false; // the wheel is animating
+let waitingForServer = false; // an online spin was asked for and not yet decided
 let syncAfterSpin = false;
-let currentDay = todayKey();
+let currentDay = '';
+const spinQueue = []; // online spins waiting to play, in order
+let resultShownAt = 0;
 
 function init() {
   hydrateIcons();
@@ -48,9 +59,11 @@ function init() {
   if (store.getState().settings.sound) fx.preloadSounds();
   wheelView = new WheelView(els.canvas, { onTick });
   initSettings({ onChange: render, syncFromStorage });
+  initOnlineUi({ onChange: render });
   bindEvents();
   render();
-  if (!store.getState().wheels.length && store.getLoadProblem() !== 'newer-version') openWelcome();
+  const openedFromLink = handleLinkInUrl();
+  if (!openedFromLink && !store.getState().wheels.length && store.getLoadProblem() !== 'newer-version') openWelcome();
   announceLoadProblem();
 
   // Labels were measured with the fallback font until the web font arrives.
@@ -73,6 +86,8 @@ function init() {
   window.addEventListener('pageshow', (event) => {
     if (event.persisted) syncFromStorage();
   });
+  // A QR code scanned while the app is already open.
+  window.addEventListener('hashchange', () => handleLinkInUrl());
   registerServiceWorker();
 }
 
@@ -95,7 +110,7 @@ function announceLoadProblem() {
 /** Reload from storage if another copy of the app changed it. Returns true if it reloaded. */
 function syncFromStorage() {
   if (!store.storageChangedElsewhere()) return false;
-  if (spinning) {
+  if (spinning || waitingForServer) {
     syncAfterSpin = true;
     return false;
   }
@@ -103,7 +118,7 @@ function syncFromStorage() {
   // The welcome and result dialogs are safe to leave open.
   discardSettings();
   for (const dialog of document.querySelectorAll('dialog[open]')) {
-    if (dialog !== els.result && !dialog.classList.contains('welcome')) dialog.close();
+    if (dialog !== els.result && !dialog.classList.contains('welcome') && !dialog.classList.contains('join')) dialog.close();
   }
   store.load();
   render();
@@ -120,6 +135,15 @@ function syncTheme() {
   fx.setAmbient(els.ambient, theme.ambient);
 }
 
+/** Keep a live connection to the wheel on screen, if it's an online one. */
+function syncConnection(wheel) {
+  online.connectTo(wheel, {
+    onChange: render,
+    onStatus: render,
+    onSpun,
+  });
+}
+
 function bindEvents() {
   els.spinBtn.addEventListener('click', spin);
   els.canvas.addEventListener('click', spin);
@@ -133,7 +157,7 @@ function bindEvents() {
   els.players.addEventListener('click', (event) => {
     const button = event.target.closest('button');
     const wheel = store.activeWheel();
-    if (spinning || !button || !wheel) return;
+    if (spinning || waitingForServer || !button || !wheel) return;
     if (button.hasAttribute('data-add')) {
       openSettings('players');
     } else {
@@ -143,22 +167,22 @@ function bindEvents() {
   });
 
   els.history.addEventListener('click', (event) => {
-    const chip = event.target.closest('[data-option]');
+    const chip = event.target.closest('[data-spin]');
     const wheel = store.activeWheel();
     if (spinning || !chip || !wheel) return;
-    const progress = store.activeProgress(wheel);
-    const option = wheel.options.find((o) => o.id === chip.dataset.option);
-    const entry = progress.history.findLast((h) => h.optionId === chip.dataset.option);
-    if (option && entry) showResult(wheel, progress, option, { entry });
+    const spin = wheel.spins.find((s) => s.id === chip.dataset.spin);
+    const option = spin && store.findOption(wheel, spin.optionId);
+    if (option) showResult(wheel, spin, option);
   });
 
   els.result.addEventListener('close', () => {
     document.body.append(els.confetti);
-    if (syncAfterSpin) {
+    if (syncAfterSpin && !spinQueue.length) {
       syncAfterSpin = false;
       if (syncFromStorage()) return;
     }
     render();
+    playQueue();
   });
 
   // Wheels menu: switching wheels is open to everyone; making one goes through settings (PIN).
@@ -185,7 +209,10 @@ function render() {
   syncTheme();
   renderWarnings();
   const wheel = store.activeWheel();
+  syncConnection(wheel);
+  renderOnlineStatus(wheel);
   renderPlayers(wheel);
+  currentDay = dayKey(new Date(), wheel?.timeZone);
 
   if (!wheel) {
     els.title.textContent = APP_NAME;
@@ -197,12 +224,12 @@ function render() {
     return;
   }
 
-  const progress = store.activeProgress(wheel);
+  const playerId = store.activePlayerId(wheel);
   els.title.textContent = store.wheelTitle(wheel);
   document.title = `${store.wheelTitle(wheel)} · ${APP_NAME}`;
-  wheelView.setLabels(store.spinPool(wheel, progress).map((o) => o.label));
-  renderStatus(wheel, progress);
-  renderProgress(wheel, progress);
+  wheelView.setLabels(store.spinPool(wheel, playerId).map((o) => o.label));
+  renderStatus(wheel, playerId);
+  renderProgress(wheel, playerId);
 }
 
 function renderWarnings() {
@@ -217,20 +244,29 @@ function renderWarnings() {
   }
   els.warning.textContent = message;
   els.warning.hidden = !message;
-
 }
 
-/** One button per player (pressed = selected). Shared wheels (no players) show none. */
+function renderOnlineStatus(wheel) {
+  const text = statusText(wheel, online.connectionStatus(wheel));
+  els.onlineStatus.textContent = text;
+  els.onlineStatus.hidden = !text;
+}
+
+/**
+ * One button per player (pressed = selected). Not shown on a shared wheel without players, or
+ * on a phone that joined an online wheel (it always spins as itself).
+ */
 function renderPlayers(wheel) {
-  els.players.hidden = !wheel || store.isShared(wheel);
+  const role = store.roleOf(wheel);
+  els.players.hidden = !wheel || role === 'player' || !wheel.players.length;
   if (els.players.hidden) {
     els.players.innerHTML = '';
     return;
   }
   const selected = store.activePlayer(wheel);
   const badge = (player) => {
-    if (!wheel.spinsPerDay) return '';
-    return store.spinStatus(wheel, player).ok
+    if (!wheel.spinsPerDay || wheel.sharedWheel) return '';
+    return store.spinStatus(wheel, player.id).ok
       ? '<span class="tab-badge ready" aria-hidden="true"></span><span class="visually-hidden">(ready to spin)</span>'
       : '<span class="tab-badge done" aria-hidden="true">✓</span><span class="visually-hidden">(done for today)</span>';
   };
@@ -238,73 +274,100 @@ function renderPlayers(wheel) {
     wheel.players
       .map(
         (player) => `
-        <button type="button" class="tab" aria-pressed="${player.id === selected.id}" data-id="${escapeHtml(player.id)}">
+        <button type="button" class="tab" aria-pressed="${player.id === selected?.id}" data-id="${escapeHtml(player.id)}">
           ${escapeHtml(displayName(player))}${badge(player)}
         </button>`,
       )
       .join('') + `<button type="button" class="tab tab-add" data-add aria-label="Add player" title="Add player">${icon('plus')}</button>`;
 }
 
-function renderStatus(wheel, progress) {
-  const status = store.spinStatus(wheel, progress);
-  const player = store.activePlayer(wheel);
+function renderStatus(wheel, playerId) {
+  const status = store.spinStatus(wheel, playerId);
+  const player = store.findPlayer(wheel, playerId);
+  const connected = !wheel.online || online.connectionStatus(wheel) === 'online';
   // "Ready for today's spin, Ava!" for a player; "Ready for today's spin!" for a shared wheel.
   const say = (text) => `${text}${player ? `, ${displayName(player)}` : ''}!`;
 
-  els.spinBtn.disabled = !status.ok;
+  els.spinBtn.disabled = !status.ok || !connected || waitingForServer;
   els.spinBtn.textContent = status.reason === 'locked' ? 'See you tomorrow!' : 'Spin!';
+  if (waitingForServer) {
+    els.status.textContent = 'Spinning…';
+    return;
+  }
 
-  const manySpins = wheel.spinsPerDay > 1 || store.bonusToday(progress) > 0;
+  const manySpins = wheel.spinsPerDay > 1 || store.bonusToday(wheel, playerId) > 0;
   const messages = {
-    empty: 'This wheel has no options yet. Add some in Settings.',
+    empty: store.canManage(wheel) ? 'This wheel has no options yet. Add some in Settings.' : 'This wheel has no options yet.',
     done: `${say('All done')} Every one has been spun. 🎉`,
     locked: `${say(`That's ${manySpins ? 'all the spins' : 'the spin'} for today`)} Come back tomorrow. 🌙`,
+    'no-player': wheel.online ? 'Waiting for players to join. Show the QR code from Settings → Players.' : 'Add a player to spin.',
   };
-  els.status.textContent = status.ok ? readyMessage(wheel, progress, say) : messages[status.reason];
+  els.status.textContent = status.ok ? readyMessage(wheel, playerId, say) : messages[status.reason];
 }
 
-function readyMessage(wheel, progress, say) {
+function readyMessage(wheel, playerId, say) {
   if (!wheel.spinsPerDay) return '';
-  const left = store.spinsLeftToday(wheel, progress);
-  const usedSome = store.spinsToday(progress) > 0;
+  const left = store.spinsLeftToday(wheel, playerId);
+  const usedSome = store.spinsToday(wheel, playerId) > 0;
   if (left === 1) return usedSome ? say('One more spin today') : say("Ready for today's spin");
   return say(usedSome ? `${left} spins left today` : `${left} spins today`);
 }
 
-function renderProgress(wheel, progress) {
+/** The day a spin happened, in the wheel's time zone, e.g. "Dec 3". */
+const spinDay = (wheel, spin) => formatDay(dayKey(spin.at, wheel.timeZone));
+
+/** "Maya" for a spin on a wheel where who spun matters; '' otherwise. */
+function spinnerName(wheel, spin) {
+  if (!wheel.sharedWheel || !spin.playerId) return '';
+  return displayName(store.findPlayer(wheel, spin.playerId));
+}
+
+function renderProgress(wheel, playerId) {
   if (!wheel.options.length) {
     els.progress.hidden = true;
     return;
   }
   els.progress.hidden = false;
-  if (wheel.removeAfterSpin) renderOpenedGrid(wheel, progress);
-  else renderRecentSpins(progress);
+  if (wheel.removeAfterSpin) renderOpenedGrid(wheel, playerId);
+  else renderRecentSpins(wheel, playerId);
 }
 
 /** Every option as a tile; spun ones are "opened" and can be tapped to see the result again. */
-function renderOpenedGrid(wheel, progress) {
-  const opened = store.openedOptions(wheel, progress);
-  const today = todayKey();
+function renderOpenedGrid(wheel, playerId) {
+  const opened = store.openedOptions(wheel, playerId);
+  const today = dayKey(new Date(), wheel.timeZone);
   els.progressTitle.textContent = `${opened.size} of ${wheel.options.length} opened`;
   els.history.className = 'history-grid';
   els.history.innerHTML = wheel.options
     .map((option) => {
-      const entry = opened.get(option.id);
-      const classes = ['chip', entry && 'opened', entry?.date === today && 'today', option.label.length > 3 && 'long'].filter(Boolean).join(' ');
+      const spin = opened.get(option.id);
+      const day = spin ? dayKey(spin.at, wheel.timeZone) : '';
+      const classes = ['chip', spin && 'opened', day === today && 'today', option.label.length > 3 && 'long'].filter(Boolean).join(' ');
       const label = `<span class="chip-label">${escapeHtml(option.label)}</span>`;
-      return entry
-        ? `<button type="button" class="${classes}" data-option="${escapeHtml(option.id)}" title="Spun ${formatDay(entry.date)}">${label}<small>${formatDay(entry.date)}</small></button>`
-        : `<div class="${classes}">${label}</div>`;
+      if (!spin) return `<div class="${classes}">${label}</div>`;
+      const who = spinnerName(wheel, spin);
+      const note = who ? `${who} · ${spinDay(wheel, spin)}` : spinDay(wheel, spin);
+      return `<button type="button" class="${classes}" data-spin="${escapeHtml(spin.id)}" title="Spun ${escapeHtml(note)}">${label}<small>${escapeHtml(note)}</small></button>`;
     })
     .join('');
 }
 
-function renderRecentSpins(progress) {
+function renderRecentSpins(wheel, playerId) {
   els.progressTitle.textContent = 'Recent spins';
   els.history.className = '';
-  const recent = progress.history.slice(-10).reverse();
+  const recent = store
+    .spinsFor(wheel, playerId)
+    .slice(-10)
+    .reverse();
   els.history.innerHTML = recent.length
-    ? `<ul class="history-list">${recent.map((h) => `<li><span>${escapeHtml(h.label)}</span><small>${formatDay(h.date)}</small></li>`).join('')}</ul>`
+    ? `<ul class="history-list">${recent
+        .map((spin) => {
+          const option = store.findOption(wheel, spin.optionId);
+          const who = spinnerName(wheel, spin);
+          const note = who ? `${who} · ${spinDay(wheel, spin)}` : spinDay(wheel, spin);
+          return `<li><span>${escapeHtml(option?.label ?? 'Removed option')}</span><small>${escapeHtml(note)}</small></li>`;
+        })
+        .join('')}</ul>`
     : '<p class="empty-note">No spins yet.</p>';
 }
 
@@ -320,28 +383,85 @@ function openWheelsMenu() {
 // ---------------------------------------------------------------- Spinning
 
 async function spin() {
-  if (spinning) return;
+  if (spinning || waitingForServer || spinQueue.length) return;
   // If another copy of the app spun meanwhile, pick up its data first (and re-check the limit).
   if (syncFromStorage()) return;
   const wheel = store.activeWheel();
   if (!wheel) return;
-  const progress = store.activeProgress(wheel);
-  if (!store.spinStatus(wheel, progress).ok) return;
+  const playerId = store.activePlayerId(wheel);
+  if (!store.spinStatus(wheel, playerId).ok) return;
+  if (store.getState().settings.sound) fx.unlockAudio();
 
+  if (wheel.online) {
+    // The server picks the result and tells every phone; onSpun() plays it.
+    const connection = online.currentConnection();
+    if (connection?.wheel !== wheel || connection.status !== 'online') return;
+    waitingForServer = true;
+    render();
+    try {
+      await connection.spin(playerId);
+    } catch (err) {
+      alertDialog(err.message, { title: "Couldn't spin" });
+    } finally {
+      waitingForServer = false;
+      if (!spinning) render();
+    }
+    return;
+  }
+
+  // Decide the result first (fair, crypto-random), then animate to it. It's saved before the
+  // wheel moves, so refreshing mid-spin can't re-roll.
+  const labels = store.spinPool(wheel, playerId).map((o) => o.label);
+  const { spin: entry, option, index } = store.spinLocal(wheel, playerId);
+  renderWarnings();
+  await playSpin({ wheel, spin: entry, option, index, labels });
+}
+
+/** A spin decided by the server (this phone's, or someone else's). */
+function onSpun(event) {
+  const wheel = store.activeWheel();
+  if (online.currentConnection()?.wheel !== wheel) return;
+  // A shared wheel shows every spin. Otherwise only the spins of whoever is on screen play;
+  // others (the host watching, or players who share spins) get a short note instead.
+  const onScreen = wheel.sharedWheel || event.spin.playerId === store.activePlayerId(wheel);
+  if (!onScreen || event.index < 0) {
+    const player = store.findPlayer(wheel, event.spin.playerId);
+    toast(`${player ? displayName(player) : 'Someone'} got ${event.option.label}!`);
+    render();
+    return;
+  }
+  spinQueue.push({ wheel, ...event });
+  playQueue();
+}
+
+/** Play queued online spins one after another. */
+async function playQueue() {
+  if (spinning || !spinQueue.length) return;
+  if (els.result.open) {
+    // Let the last result be seen for a moment, then make way for the next spin.
+    const wait = resultShownAt + RESULT_MIN_MS - Date.now();
+    if (wait > 0) {
+      setTimeout(playQueue, wait);
+      return;
+    }
+    els.result.close(); // its close handler calls playQueue() again
+    return;
+  }
+  const next = spinQueue.shift();
+  if (next.wheel !== store.activeWheel()) {
+    playQueue();
+    return;
+  }
+  await playSpin(next);
+}
+
+async function playSpin({ wheel, spin, option, index, labels }) {
   const { settings } = store.getState();
-  if (settings.sound) fx.unlockAudio();
-
-  // Decide the result first (fair, crypto-random), then animate to it.
-  const pool = store.spinPool(wheel, progress);
-  const index = randomInt(pool.length);
-  const option = pool[index];
-
   spinning = true;
   document.body.classList.add('is-spinning');
-  store.recordSpin(wheel, progress, option); // saved now, so refreshing mid-spin can't re-roll
-  renderWarnings();
   els.spinBtn.disabled = true;
   els.status.textContent = 'Spinning…';
+  wheelView.setLabels(labels); // the wheel as it was before this spin
 
   const reducedMotion = prefersReducedMotion();
   const seconds = reducedMotion ? Math.min(settings.spinSeconds, 1.5) : settings.spinSeconds;
@@ -351,7 +471,7 @@ async function spin() {
     spinning = false;
     document.body.classList.remove('is-spinning');
   }
-  showResult(wheel, progress, option, { celebrate: true });
+  showResult(wheel, spin, option, { celebrate: true });
 }
 
 function onTick() {
@@ -362,14 +482,14 @@ function onTick() {
   els.pointer.classList.add('flick');
 }
 
-/** Show a result: right after a spin (`celebrate`), or again from a history tile (`entry`). */
-function showResult(wheel, progress, option, { celebrate = false, entry = null } = {}) {
+/** Show a result: right after a spin (`celebrate`), or again from a history tile. */
+function showResult(wheel, spin, option, { celebrate = false } = {}) {
   if (els.result.open) return;
   const { settings } = store.getState();
-  const player = progress === wheel.shared ? null : progress;
+  const player = store.findPlayer(wheel, spin.playerId);
   const who = player ? displayName(player) : store.wheelTitle(wheel);
   $('#result-emoji').textContent = theme.resultEmoji;
-  $('#result-kicker').textContent = celebrate ? (player ? `${who} got…` : 'And the wheel says…') : `${who} · ${formatDay(entry.date)}`;
+  $('#result-kicker').textContent = celebrate ? (player ? `${who} got…` : 'And the wheel says…') : `${who} · ${spinDay(wheel, spin)}`;
   $('#result-label').textContent = option.label;
   const surprise = $('#result-surprise');
   surprise.textContent = option.surprise;
@@ -378,19 +498,27 @@ function showResult(wheel, progress, option, { celebrate = false, entry = null }
   // Dialogs render above everything, so confetti must live inside the open dialog.
   els.result.append(els.confetti);
   els.result.showModal();
+  resultShownAt = Date.now();
   if (celebrate) {
     if (settings.confetti) fx.confettiBurst(els.confetti, theme.confetti);
     if (settings.sound) fx.playMelody(theme.melody);
   }
+  if (spinQueue.length) setTimeout(playQueue, RESULT_MIN_MS);
+}
+
+let toastTimer = 0;
+function toast(message) {
+  els.toast.textContent = message;
+  els.toast.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => (els.toast.hidden = true), 4000);
 }
 
 // ---------------------------------------------------------------- Misc
 
 function checkNewDay() {
   if (spinning || els.result.open) return;
-  const day = todayKey();
-  if (day !== currentDay) {
-    currentDay = day;
+  if (dayKey(new Date(), store.activeWheel()?.timeZone) !== currentDay) {
     store.dailySnapshot();
     render();
   }

@@ -1,13 +1,25 @@
 {
-  // Assets-only Worker: there is no `main`, so Cloudflare simply serves everything in
-  // ./public as static files. There is no build step. public/_headers adds security headers.
+  // A Worker with static assets. Files in ./public are served by Cloudflare directly (free and
+  // unlimited); only /api/* and /j/* run the Worker in server/index.js, which handles online
+  // wheels with Durable Objects. There is still no build step for the site.
   //
   // Deployed by Cloudflare Workers Builds on every push to main (see README).
   "name": "whirl-a-day",
-  "compatibility_date": "2026-11-01",
+  "main": "server/index.js",
+  "compatibility_date": "2026-10-20",
   "assets": {
-    "directory": "./public"
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*", "/j/*"]
   },
+  "durable_objects": {
+    "bindings": [
+      { "name": "WHEELS", "class_name": "Wheel" },
+      { "name": "DIRECTORY", "class_name": "Directory" }
+    ]
+  },
+  // SQLite-backed Durable Objects are the kind the free plan supports.
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Wheel", "Directory"] }],
   // Requires whirladay.com to be a zone in the same Cloudflare account.
   "routes": [{ "pattern": "whirladay.com", "custom_domain": true }]
 }
