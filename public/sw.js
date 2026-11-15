@@ -48,6 +48,8 @@ const CORE_FILES = [
   'js/vendor/canvas-confetti-1.9.4.js',
   'js/vendor/qrcode-generator-2.0.4.js',
   'icons/icon.svg',
+  'icons/favicon.svg',
+  'favicon.ico',
   'icons/icon-180.png',
   'icons/icon-512.png',
   'sounds/tick-wood-1.wav',
