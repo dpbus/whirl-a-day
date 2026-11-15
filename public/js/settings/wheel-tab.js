@@ -1,5 +1,5 @@
-// Settings → This wheel: the active wheel's title, theme and rules, its options,
-// and the progress tools (undo, extra spin, reset) for whoever is selected.
+// Settings → This wheel: the active wheel's title, theme and rules, its options, putting it
+// online, and removing it. (Progress tools: see progress.js.)
 import * as store from '../state.js';
 import { getPreset } from '../presets.js';
 import { alertDialog, confirmDialog } from '../dialogs.js';
@@ -10,6 +10,7 @@ import * as online from '../store/online.js';
 import { keepLocalCopy, putOnline, showHostLink, takeOffline } from '../online-ui.js';
 import { $, displayName, escapeHtml, formatDay, range } from '../util.js';
 import { bindThemeCards, presetOptions, themeCards } from './shared.js';
+import { bindWheelProgress, wheelProgressSection } from './progress.js';
 
 export function render(view) {
   const wheel = store.activeWheel();
@@ -17,13 +18,17 @@ export function render(view) {
   view.body.innerHTML = `
     ${rulesSection(wheel)}
     ${optionsSection()}
-    ${progressSection(wheel)}
+    <div id="w-progress">${wheel.players.length ? progressPointer() : wheelProgressSection(wheel)}</div>
     ${onlineSection(wheel)}
     ${removeSection(wheel)}
   `;
   bindRules(view, wheel);
   bindOptions(view, wheel);
-  bindProgress(view, wheel);
+  bindWheelProgress($('#w-progress', view.body), wheel, () => {
+    view.changed();
+    refresh(view);
+  });
+  $('#w-to-players', view.body)?.addEventListener('click', () => view.showTab('players'));
   bindOnline(view, wheel);
   bindRemove(view, wheel);
 }
@@ -263,98 +268,15 @@ function bindOptions(view, wheel) {
 }
 
 // ================================================================ progress
+//
+// With players, each one's progress tools are on their row in the Players tab. A shared wheel
+// without players has nobody to list, so its tools are here.
 
-function progressSection(wheel) {
-  const player = store.activePlayer(wheel);
-  const playerId = player?.id ?? null;
-  const hasSpins = store.spinsFor(wheel, playerId).length > 0;
+function progressPointer() {
   return `
     <h3>Progress</h3>
-    ${wheel.players.length > 1 ? `
-    <div class="field">
-      <label for="w-player">For</label>
-      <select id="w-player">
-        ${wheel.players.map((p) => `<option value="${escapeHtml(p.id)}" ${p.id === playerId ? 'selected' : ''}>${escapeHtml(displayName(p))}</option>`).join('')}
-      </select>
-    </div>` : ''}
-    <p class="hint" id="w-progress-summary">${escapeHtml(progressSummary(wheel, player))}</p>
-    <div class="row wrap">
-      <button type="button" class="btn" id="w-undo" ${hasSpins ? '' : 'disabled'}>Undo last spin</button>
-      <button type="button" class="btn" id="w-extra" ${wheel.spinsPerDay && (playerId || wheel.sharedWheel) ? '' : 'disabled'}>Give 1 extra spin today</button>
-      <button type="button" class="btn danger" id="w-reset" ${hasSpins ? '' : 'disabled'}>Reset progress</button>
-    </div>
-    ${wheel.spinsPerDay ? '' : '<p class="hint">Extra spins are only needed when spins per day are limited.</p>'}
-    ${wheel.sharedWheel && wheel.players.length ? '<p class="hint">On a shared wheel, undo and reset apply to the whole wheel.</p>' : ''}`;
-}
-
-/** e.g. "Ava: 3 spins so far — last: “7” on Dec 3. Today: 1 spun, 0 left." */
-function progressSummary(wheel, player) {
-  const playerId = player?.id ?? null;
-  const spins = store.spinsFor(wheel, playerId);
-  const last = spins.at(-1);
-  const lastOption = last && store.findOption(wheel, last.optionId);
-  const forWhom = player && !wheel.sharedWheel ? `${displayName(player)}: ` : '';
-  let text = `${forWhom}${plural(spins.length, 'spin')} so far`;
-  if (last) text += ` — last: “${lastOption?.label ?? 'a removed option'}” on ${formatDay(dayKey(last.at, wheel.timeZone))}`;
-  text += '.';
-  if (wheel.spinsPerDay) {
-    const bonus = store.bonusToday(wheel, playerId);
-    const who = player && wheel.sharedWheel && !wheel.sharedDailyLimit ? ` for ${displayName(player)}` : '';
-    text += ` Today${who}: ${store.spinsToday(wheel, playerId)} spun, ${store.spinsLeftToday(wheel, playerId)} left`;
-    text += bonus ? ` (includes ${bonus} extra).` : '.';
-  }
-  return text;
-}
-
-function bindProgress(view, wheel) {
-  /** The wheel and player as they are now (the data may have been reloaded meanwhile). */
-  const current = () => {
-    const fresh = store.getWheel(wheel.id);
-    return fresh && { wheel: fresh, player: store.activePlayer(fresh), playerId: store.activePlayerId(fresh) };
-  };
-
-  $('#w-player', view.body)?.addEventListener('change', (event) => {
-    store.setActivePlayer(wheel, event.target.value);
-    view.changed();
-    refresh(view);
-  });
-
-  $('#w-undo', view.body).addEventListener('click', async () => {
-    const { wheel: w, playerId } = current();
-    const last = store.spinsFor(w, playerId).at(-1);
-    if (!last) return;
-    const label = store.findOption(w, last.optionId)?.label ?? 'a removed option';
-    const ok = await confirmDialog(`Undo “${label}” (${formatDay(dayKey(last.at, w.timeZone))})? It goes back on the wheel and can be spun again.`, {
-      title: 'Undo last spin?',
-      ok: 'Undo',
-    });
-    const now = current();
-    if (!ok || !now) return;
-    store.undoLastSpin(now.wheel, now.playerId);
-    view.changed();
-    refresh(view);
-  });
-
-  $('#w-extra', view.body).addEventListener('click', () => {
-    const now = current();
-    store.allowExtraSpin(now.wheel, now.playerId);
-    view.changed();
-    refresh(view);
-  });
-
-  $('#w-reset', view.body).addEventListener('click', async () => {
-    const { wheel: w, player } = current();
-    const message =
-      player && !w.sharedWheel
-        ? `Reset ${displayName(player)}'s progress on this wheel? Every option goes back on and the history is cleared.`
-        : 'Reset this wheel? Every option goes back on and the history is cleared.';
-    const ok = await confirmDialog(message, { title: 'Reset progress?', ok: 'Reset', danger: true });
-    const now = current();
-    if (!ok || !now) return;
-    store.resetProgress(now.wheel, now.playerId);
-    view.changed();
-    refresh(view);
-  });
+    <p class="hint">To undo a spin, give an extra spin or reset progress, go to Players.</p>
+    <button type="button" class="btn small" id="w-to-players">Go to Players</button>`;
 }
 
 // ================================================================ online

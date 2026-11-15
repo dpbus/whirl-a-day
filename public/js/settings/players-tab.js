@@ -1,16 +1,19 @@
-// Settings → Players: the active wheel's players (rename, reorder, remove, add). For an online
-// wheel, also who has joined from which phone, and the controls for joining.
+// Settings → Players: the active wheel's players (rename, reorder, remove, add) and their
+// progress tools (see progress.js). For an online wheel, also who has joined, and the controls
+// for joining.
 import * as store from '../state.js';
 import { alertDialog, confirmDialog } from '../dialogs.js';
 import { icon } from '../icons.js';
 import { listItemControls, onListItemAction, plural } from '../templates.js';
 import { hostAction, showInvite } from '../online-ui.js';
+import { bindPlayerProgress, bindWheelProgress, playerProgressRow, wheelProgressSection } from './progress.js';
 import { $, displayName, escapeHtml } from '../util.js';
 
 export function render(view) {
   const wheel = store.activeWheel();
   view.body.innerHTML = `
     ${wheel.online ? joiningSection(wheel) : ''}
+    ${wheel.sharedWheel && wheel.players.length ? `<div id="p-wheel-progress">${wheelProgressSection(wheel)}</div>` : ''}
     <h3>Players on “${escapeHtml(store.wheelTitle(wheel))}”</h3>
     <p class="hint">${playersHint(wheel)}</p>
     ${wheel.players.length ? '<ul class="player-list" id="p-list"></ul>' : `<p class="hint"><em>${wheel.online ? 'Nobody yet.' : 'No players: this is a shared wheel.'}</em></p>`}
@@ -18,10 +21,16 @@ export function render(view) {
   `;
   if (wheel.online) bindJoining(view, wheel);
   if (wheel.players.length) renderPlayerList(view, wheel);
+  const progressBox = $('#p-wheel-progress', view.body);
+  if (progressBox) bindWheelProgress(progressBox, wheel, () => changed(view));
   bindAddPlayer(view, wheel);
 }
 
 const refresh = (view) => view.showTab('players', { keepScroll: true });
+const changed = (view) => {
+  view.changed();
+  refresh(view);
+};
 
 function playersHint(wheel) {
   if (!wheel.online) return "Each player has their own progress on this wheel. With no players, it's a shared wheel that everyone spins together.";
@@ -100,6 +109,7 @@ function renderPlayerList(view, wheel) {
         <input class="p-name" maxlength="${store.MAX_NAME_LENGTH}" aria-label="Name of player ${i + 1}">
         ${claimStatus(wheel, player)}
         ${listItemControls(displayName(player), i, wheel.players.length)}
+        ${playerProgressRow(wheel, player)}
       </li>`,
     )
     .join('');
@@ -111,6 +121,8 @@ function renderPlayerList(view, wheel) {
     store.renamePlayer(wheel, id, event.target.value);
     view.changedSoon();
   });
+
+  bindPlayerProgress(list, wheel, () => changed(view));
 
   list.addEventListener('click', (event) => {
     const id = event.target.closest('[data-id]')?.dataset.id;

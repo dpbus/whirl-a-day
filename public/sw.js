@@ -39,6 +39,7 @@ const CORE_FILES = [
   'js/settings/index.js',
   'js/settings/shared.js',
   'js/settings/new-wheel.js',
+  'js/settings/progress.js',
   'js/settings/wheel-tab.js',
   'js/settings/players-tab.js',
   'js/settings/general-tab.js',
